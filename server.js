@@ -19,16 +19,32 @@ const PORT = process.env.PORT || 8080;
 app.use(cors({
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: true
 }));
 
 // Middleware
 app.use(express.json());
+
+// Logging middleware
 app.use((req, res, next) => {
-    console.log(`${req.method} ${req.path}`, {
-        body: req.body,
-        headers: req.headers
-    });
+    // Log request
+    console.log('\n--- Incoming Request ---');
+    console.log('Time:', new Date().toISOString());
+    console.log('Method:', req.method);
+    console.log('Path:', req.path);
+    console.log('Headers:', req.headers);
+    console.log('Body:', req.body);
+
+    // Capture the original send
+    const originalSend = res.send;
+    res.send = function(data) {
+        console.log('\n--- Outgoing Response ---');
+        console.log('Status:', res.statusCode);
+        console.log('Response Body:', data);
+        return originalSend.call(this, data);
+    };
+
     next();
 });
 
@@ -62,21 +78,23 @@ mongoose.connect(process.env.MONGODB_URI, {
 // User Registration
 app.post('/api/users/register', async (req, res) => {
     try {
-        console.log('Registration request received:', req.body);
+        console.log('\n=== Registration Attempt ===');
+        console.log('Request body:', req.body);
 
         const { name, email, password } = req.body;
 
         // Validate required fields
         if (!name || !email || !password) {
-            console.error('Missing required fields:', { name: !!name, email: !!email, password: !!password });
+            console.log('Missing required fields');
             return res.status(400).json({ error: 'All fields are required' });
         }
 
         // Check if user already exists
         const existingUser = await User.findOne({ email });
-        console.log('Existing user check:', existingUser ? 'User exists' : 'User does not exist');
+        console.log('User found:', existingUser ? 'Yes' : 'No');
 
         if (existingUser) {
+            console.log('User already exists');
             return res.status(400).json({ error: 'Email already registered' });
         }
 
@@ -104,7 +122,7 @@ app.post('/api/users/register', async (req, res) => {
             { expiresIn: '7d' }
         );
 
-        console.log('Sending registration response');
+        console.log('Registration successful, sending response');
         res.status(201).json({
             message: 'Registration successful',
             user: {
@@ -124,27 +142,32 @@ app.post('/api/users/register', async (req, res) => {
 // User Login
 app.post('/api/users/login', async (req, res) => {
     try {
-        console.log('Login request received:', req.body);
+        console.log('\n=== Login Attempt ===');
+        console.log('Request body:', req.body);
 
         const { email, password } = req.body;
+
+        // Validate input
         if (!email || !password) {
-            console.error('Missing credentials:', { email: !!email, password: !!password });
+            console.log('Missing credentials');
             return res.status(400).json({ error: 'Email and password are required' });
         }
 
         // Find user
         const user = await User.findOne({ email });
-        console.log('User lookup result:', user ? 'Found' : 'Not found');
+        console.log('User found:', user ? 'Yes' : 'No');
 
         if (!user) {
+            console.log('User not found');
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
-        // Check password
+        // Verify password
         const isValidPassword = await bcrypt.compare(password, user.password);
-        console.log('Password validation result:', isValidPassword);
+        console.log('Password valid:', isValidPassword);
 
         if (!isValidPassword) {
+            console.log('Invalid password');
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
@@ -166,8 +189,8 @@ app.post('/api/users/login', async (req, res) => {
             token
         };
 
-        console.log('Sending login response:', response);
-        return res.json(response);
+        console.log('Login successful, sending response');
+        return res.status(200).json(response);
 
     } catch (error) {
         console.error('Login error:', error);
@@ -256,8 +279,10 @@ const auth = async (req, res, next) => {
 // GET /api/tasks - Get all tasks for a user
 app.get('/api/tasks', auth, async (req, res) => {
     try {
+        console.log('\n=== Fetching Tasks ===');
         const tasks = await Task.find({ userId: req.user._id })
             .sort({ deadline: 1 });
+        console.log('Tasks fetched successfully');
         res.json(tasks);
     } catch (error) {
         console.error('Error fetching tasks:', error);
@@ -271,15 +296,18 @@ app.get('/api/tasks', auth, async (req, res) => {
 // GET /api/tasks/:id - Get a specific task
 app.get('/api/tasks/:id', auth, async (req, res) => {
     try {
+        console.log('\n=== Fetching Task ===');
         const task = await Task.findOne({ 
             _id: req.params.id,
             userId: req.user._id 
         });
 
         if (!task) {
+            console.log('Task not found');
             return res.status(404).json({ error: 'Task not found' });
         }
 
+        console.log('Task fetched successfully');
         res.json(task);
     } catch (error) {
         console.error('Error fetching task:', error);
@@ -293,10 +321,12 @@ app.get('/api/tasks/:id', auth, async (req, res) => {
 // POST /api/tasks - Create a new task
 app.post('/api/tasks', auth, async (req, res) => {
     try {
+        console.log('\n=== Creating Task ===');
         const { title, description, deadline, priority } = req.body;
 
         // Validate required fields
         if (!title || !deadline || !priority) {
+            console.log('Missing required fields');
             return res.status(400).json({ 
                 error: 'Missing required fields',
                 required: ['title', 'deadline', 'priority']
@@ -306,6 +336,7 @@ app.post('/api/tasks', auth, async (req, res) => {
         // Validate priority
         const validPriorities = ['low', 'medium', 'high'];
         if (!validPriorities.includes(priority)) {
+            console.log('Invalid priority level');
             return res.status(400).json({ 
                 error: 'Invalid priority level',
                 validOptions: validPriorities 
@@ -338,6 +369,7 @@ app.post('/api/tasks', auth, async (req, res) => {
 
         await transporter.sendMail(mailOptions);
 
+        console.log('Task created successfully');
         res.status(201).json(task);
     } catch (error) {
         console.error('Error creating task:', error);
@@ -351,6 +383,7 @@ app.post('/api/tasks', auth, async (req, res) => {
 // PUT /api/tasks/:id - Update a task
 app.put('/api/tasks/:id', auth, async (req, res) => {
     try {
+        console.log('\n=== Updating Task ===');
         const updates = req.body;
         const allowedUpdates = ['title', 'description', 'deadline', 'priority', 'completed'];
         
@@ -359,6 +392,7 @@ app.put('/api/tasks/:id', auth, async (req, res) => {
         const isValidOperation = updateFields.every(field => allowedUpdates.includes(field));
         
         if (!isValidOperation) {
+            console.log('Invalid updates');
             return res.status(400).json({ 
                 error: 'Invalid updates',
                 allowedUpdates 
@@ -371,6 +405,7 @@ app.put('/api/tasks/:id', auth, async (req, res) => {
         });
 
         if (!task) {
+            console.log('Task not found');
             return res.status(404).json({ error: 'Task not found' });
         }
 
@@ -401,6 +436,7 @@ app.put('/api/tasks/:id', auth, async (req, res) => {
             await transporter.sendMail(mailOptions);
         }
 
+        console.log('Task updated successfully');
         res.json(task);
     } catch (error) {
         console.error('Error updating task:', error);
@@ -414,15 +450,18 @@ app.put('/api/tasks/:id', auth, async (req, res) => {
 // DELETE /api/tasks/:id - Delete a task
 app.delete('/api/tasks/:id', auth, async (req, res) => {
     try {
+        console.log('\n=== Deleting Task ===');
         const task = await Task.findOneAndDelete({ 
             _id: req.params.id,
             userId: req.user._id 
         });
 
         if (!task) {
+            console.log('Task not found');
             return res.status(404).json({ error: 'Task not found' });
         }
 
+        console.log('Task deleted successfully');
         res.json({ message: 'Task deleted successfully', task });
     } catch (error) {
         console.error('Error deleting task:', error);
@@ -436,6 +475,7 @@ app.delete('/api/tasks/:id', auth, async (req, res) => {
 // GET /api/tasks/search - Search tasks
 app.get('/api/tasks/search', auth, async (req, res) => {
     try {
+        console.log('\n=== Searching Tasks ===');
         const { query, priority, completed, startDate, endDate } = req.query;
         
         const searchCriteria = { userId: req.user._id };
@@ -469,6 +509,7 @@ app.get('/api/tasks/search', auth, async (req, res) => {
         const tasks = await Task.find(searchCriteria)
             .sort({ deadline: 1 });
 
+        console.log('Tasks searched successfully');
         res.json(tasks);
     } catch (error) {
         console.error('Error searching tasks:', error);
@@ -482,6 +523,7 @@ app.get('/api/tasks/search', auth, async (req, res) => {
 // Create Task
 app.post('/api/tasks', auth, async (req, res) => {
     try {
+        console.log('\n=== Creating Task ===');
         const task = new Task({
             ...req.body,
             userId: req.user._id
@@ -509,8 +551,10 @@ app.post('/api/tasks', auth, async (req, res) => {
             }, notificationDate.getTime() - Date.now());
         }
         
+        console.log('Task created successfully');
         res.status(201).send(task);
     } catch (error) {
+        console.error('Error creating task:', error);
         res.status(400).send(error);
     }
 });
@@ -518,9 +562,12 @@ app.post('/api/tasks', auth, async (req, res) => {
 // Get Tasks
 app.get('/api/tasks', auth, async (req, res) => {
     try {
+        console.log('\n=== Fetching Tasks ===');
         const tasks = await Task.find({ userId: req.user._id });
+        console.log('Tasks fetched successfully');
         res.send(tasks);
     } catch (error) {
+        console.error('Error fetching tasks:', error);
         res.status(500).send(error);
     }
 });
@@ -528,16 +575,20 @@ app.get('/api/tasks', auth, async (req, res) => {
 // Update Task
 app.patch('/api/tasks/:id', auth, async (req, res) => {
     try {
+        console.log('\n=== Updating Task ===');
         const task = await Task.findOneAndUpdate(
             { _id: req.params.id, userId: req.user._id },
             req.body,
             { new: true }
         );
         if (!task) {
+            console.log('Task not found');
             return res.status(404).send();
         }
+        console.log('Task updated successfully');
         res.send(task);
     } catch (error) {
+        console.error('Error updating task:', error);
         res.status(400).send(error);
     }
 });
@@ -545,15 +596,19 @@ app.patch('/api/tasks/:id', auth, async (req, res) => {
 // Delete Task
 app.delete('/api/tasks/:id', auth, async (req, res) => {
     try {
+        console.log('\n=== Deleting Task ===');
         const task = await Task.findOneAndDelete({
             _id: req.params.id,
             userId: req.user._id
         });
         if (!task) {
+            console.log('Task not found');
             return res.status(404).send();
         }
+        console.log('Task deleted successfully');
         res.send(task);
     } catch (error) {
+        console.error('Error deleting task:', error);
         res.status(500).send(error);
     }
 });
@@ -561,10 +616,13 @@ app.delete('/api/tasks/:id', auth, async (req, res) => {
 // Get Categories
 app.get('/api/categories', auth, async (req, res) => {
     try {
+        console.log('\n=== Fetching Categories ===');
         const tasks = await Task.find({ userId: req.user._id });
         const categories = [...new Set(tasks.flatMap(task => task.categories))];
+        console.log('Categories fetched successfully');
         res.send(categories);
     } catch (error) {
+        console.error('Error fetching categories:', error);
         res.status(500).send(error);
     }
 });
@@ -572,10 +630,13 @@ app.get('/api/categories', auth, async (req, res) => {
 // Get Tags
 app.get('/api/tags', auth, async (req, res) => {
     try {
+        console.log('\n=== Fetching Tags ===');
         const tasks = await Task.find({ userId: req.user._id });
         const tags = [...new Set(tasks.flatMap(task => task.tags))];
+        console.log('Tags fetched successfully');
         res.send(tags);
     } catch (error) {
+        console.error('Error fetching tags:', error);
         res.status(500).send(error);
     }
 });
@@ -583,6 +644,7 @@ app.get('/api/tags', auth, async (req, res) => {
 // Test Email Route
 app.get('/api/test-email', async (req, res) => {
     try {
+        console.log('\n=== Sending Test Email ===');
         const testMailOptions = {
             from: process.env.EMAIL_USER,
             to: process.env.EMAIL_USER, // sending to the same email for testing
@@ -605,6 +667,7 @@ app.get('/api/test-email', async (req, res) => {
         };
 
         await transporter.sendMail(testMailOptions);
+        console.log('Test email sent successfully');
         res.send({ message: 'Test email sent successfully! Check your inbox.' });
     } catch (error) {
         console.error('Email test error:', error);
