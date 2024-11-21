@@ -20,11 +20,9 @@ const limiter = rateLimit({
 // Middleware
 app.use(limiter);
 app.use(cors({
-    origin: process.env.NODE_ENV === 'production' 
-        ? ['https://task-masters.onrender.com']
-        : ['http://127.0.0.1:5500', 'http://localhost:5500'],
+    origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
     credentials: true,
     exposedHeaders: ['Content-Type']
 }));
@@ -164,23 +162,27 @@ const auth = async (req, res, next) => {
 // User Registration
 app.post('/api/users/register', async (req, res) => {
     try {
+        console.log('Registration request received:', req.body);
         const { name, email, password } = req.body;
 
         // Validate email format
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
         if (!emailRegex.test(email)) {
+            console.log('Invalid email format:', email);
             return res.status(400).json({ error: 'Invalid email format' });
         }
 
         // Validate password
         const passwordError = validatePassword(password);
         if (passwordError) {
+            console.log('Password validation failed:', passwordError);
             return res.status(400).json({ error: passwordError });
         }
 
         // Check if user already exists
         const existingUser = await User.findOne({ email });
         if (existingUser) {
+            console.log('Email already registered:', email);
             return res.status(400).json({ error: 'Email already registered' });
         }
 
@@ -205,9 +207,16 @@ app.post('/api/users/register', async (req, res) => {
         });
 
         await user.save();
+        console.log('User created successfully:', { name, email });
         
         // Send verification email
-        await sendVerificationEmail(user, verificationToken);
+        try {
+            await sendVerificationEmail(user, verificationToken);
+            console.log('Verification email sent successfully');
+        } catch (emailError) {
+            console.error('Error sending verification email:', emailError);
+            // Continue with registration even if email fails
+        }
 
         // Create JWT token
         const token = jwt.sign(
@@ -220,16 +229,14 @@ app.post('/api/users/register', async (req, res) => {
         );
 
         res.status(201).json({
-            message: 'Registration successful. Please check your email to verify your account.',
+            message: 'Registration successful',
+            token,
             user: {
                 id: user._id,
                 name: user.name,
-                email: user.email,
-                isVerified: user.isVerified
-            },
-            token
+                email: user.email
+            }
         });
-
     } catch (error) {
         console.error('Registration error:', error);
         res.status(500).json({ error: 'Registration failed. Please try again.' });

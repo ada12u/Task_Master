@@ -14,6 +14,7 @@ const api = {
         try {
             const headers = {
                 'Content-Type': 'application/json',
+                'Accept': 'application/json',
                 ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
             };
 
@@ -23,34 +24,28 @@ const api = {
             const response = await fetch(`${API_BASE_URL}${endpoint}`, {
                 ...options,
                 headers,
-                mode: 'cors',
-                credentials: 'include'
+                mode: 'cors'
             });
 
             console.log('Response status:', response.status);
             
-            let data;
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-                data = await response.json();
-            } else {
-                const text = await response.text();
-                console.error('Non-JSON response:', text);
-                throw new Error('Invalid response format from server');
-            }
-            
-            console.log('Response data:', data);
+            try {
+                const data = await response.json();
+                console.log('Response data:', data);
 
-            if (!response.ok) {
-                throw new Error(data.error || 'Something went wrong');
-            }
+                if (!response.ok) {
+                    throw new Error(data.error || 'Something went wrong');
+                }
 
-            return data;
+                return data;
+            } catch (jsonError) {
+                console.error('JSON parsing error:', jsonError);
+                const textResponse = await response.text();
+                console.error('Raw response:', textResponse);
+                throw new Error('Server response was not in the expected format');
+            }
         } catch (error) {
             console.error(`API Error (${endpoint}):`, error);
-            if (error instanceof SyntaxError) {
-                throw new Error('Invalid response from server. Please try again.');
-            }
             throw error;
         }
     },
