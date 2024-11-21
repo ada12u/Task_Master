@@ -16,9 +16,27 @@ const app = express();
 const PORT = process.env.PORT || 8080;
 
 // CORS configuration
+const allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:5000',
+    'http://127.0.0.1:3000',
+    'http://127.0.0.1:5000',
+    'https://task-masters.onrender.com',
+    'https://task-master.onrender.com'
+];
+
 app.use(cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    origin: function(origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        
+        if (allowedOrigins.indexOf(origin) === -1) {
+            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+            return callback(new Error(msg), false);
+        }
+        return callback(null, true);
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
 }));
@@ -672,6 +690,21 @@ app.get('/api/test-email', async (req, res) => {
     } catch (error) {
         console.error('Email test error:', error);
         res.status(500).send({ error: 'Failed to send test email', details: error.message });
+    }
+});
+
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+    const healthcheck = {
+        uptime: process.uptime(),
+        message: 'OK',
+        timestamp: Date.now()
+    };
+    try {
+        res.send(healthcheck);
+    } catch (error) {
+        healthcheck.message = error;
+        res.status(503).send();
     }
 });
 

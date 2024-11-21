@@ -240,41 +240,72 @@ body {
 .filter-group {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 10px;
+}
+
+.filter-group label {
+    font-weight: 500;
+    color: #666;
 }
 
 .filter-group select {
-    padding: 0.5rem;
-    border: 1px solid var(--border-color);
-    border-radius: 5px;
-    background: white;
+    padding: 6px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: white;
+    cursor: pointer;
+}
+
+.filter-group select:hover {
+    border-color: #999;
+}
+
+.filter-group select:focus {
+    outline: none;
+    border-color: #4da6ff;
+    box-shadow: 0 0 0 2px rgba(77, 166, 255, 0.1);
 }
 
 .priority-filters {
     display: flex;
-    gap: 0.5rem;
+    gap: 10px;
+    align-items: center;
 }
 
 .priority-badge {
-    padding: 0.25rem 0.75rem;
+    padding: 4px 12px;
     border-radius: 15px;
-    font-size: 0.875rem;
+    font-size: 0.9em;
     cursor: pointer;
+    transition: all 0.2s ease;
+    opacity: 0.6;
+    user-select: none;
+}
+
+.priority-badge:hover {
+    opacity: 0.8;
+    transform: translateY(-1px);
+}
+
+.priority-badge.active {
+    opacity: 1;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .priority-badge.high {
-    background-color: #ffebee;
-    color: var(--danger-color);
+    background-color: #ff4d4d;
+    color: white;
 }
 
 .priority-badge.medium {
-    background-color: #fff3e0;
-    color: var(--warning-color);
+    background-color: #ffa64d;
+    color: white;
 }
 
 .priority-badge.low {
-    background-color: #e8f5e9;
-    color: var(--success-color);
+    background-color: #4da6ff;
+    color: white;
 }
 
 /* Tasks Container Styles */

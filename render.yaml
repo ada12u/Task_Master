@@ -2,8 +2,22 @@ services:
   - type: web
     name: task-master
     env: node
-    buildCommand: npm install
+    buildCommand: npm install && npm run build
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
         value: production
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
+        sync: false
+    healthCheckPath: /api/health
+    autoDeploy: true
+    disk:
+      name: task-master-data
+      mountPath: /data
+      sizeGB: 1

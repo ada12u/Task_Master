@@ -1,5 +1,7 @@
 // API Configuration
-const API_BASE_URL = 'http://localhost:8080';
+const API_BASE_URL = window.location.hostname === 'localhost' 
+    ? 'http://localhost:8080'
+    : 'https://task-masters.onrender.com';
 
 // State Management
 let authToken = localStorage.getItem('authToken');
@@ -307,6 +309,43 @@ async function handleSearch(event) {
     }
 }
 
+// Task Filtering and Sorting
+async function filterTasks(filters = {}) {
+    try {
+        showLoader('Filtering tasks...');
+        const queryParams = new URLSearchParams();
+        
+        if (filters.priority) queryParams.append('priority', filters.priority);
+        if (filters.completed !== undefined) queryParams.append('completed', filters.completed);
+        if (filters.startDate) queryParams.append('startDate', filters.startDate);
+        if (filters.endDate) queryParams.append('endDate', filters.endDate);
+        if (filters.search) queryParams.append('query', filters.search);
+
+        const tasks = await api.searchTasks(queryParams.toString());
+        renderTasks(sortTasks(tasks, filters.sortBy));
+        hideLoader();
+    } catch (error) {
+        hideLoader();
+        showError('Failed to filter tasks: ' + error.message);
+    }
+}
+
+function sortTasks(tasks, sortBy = 'deadline') {
+    return [...tasks].sort((a, b) => {
+        switch (sortBy) {
+            case 'deadline':
+                return new Date(a.deadline) - new Date(b.deadline);
+            case 'priority':
+                const priorityOrder = { high: 0, medium: 1, low: 2 };
+                return priorityOrder[a.priority] - priorityOrder[b.priority];
+            case 'created':
+                return new Date(b.createdAt) - new Date(a.createdAt);
+            default:
+                return 0;
+        }
+    });
+}
+
 // Task Rendering
 function renderTasks(tasks) {
     const container = document.querySelector('#tasks-container');
@@ -353,6 +392,36 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Search listeners
     document.querySelector('#search-input').addEventListener('input', debounce(handleSearch, 500));
+
+    // Filter and sort listeners
+    document.querySelector('#sort-tasks').addEventListener('change', (e) => {
+        const currentFilters = {
+            sortBy: e.target.value,
+            priority: document.querySelector('.priority-filters .active')?.dataset.priority,
+            completed: document.querySelector('#show-completed')?.checked
+        };
+        filterTasks(currentFilters);
+    });
+
+    document.querySelectorAll('.priority-badge').forEach(badge => {
+        badge.addEventListener('click', (e) => {
+            // Toggle active state
+            document.querySelectorAll('.priority-badge').forEach(b => b.classList.remove('active'));
+            e.target.classList.toggle('active');
+
+            const currentFilters = {
+                sortBy: document.querySelector('#sort-tasks').value,
+                priority: e.target.classList.contains('active') ? e.target.dataset.priority : null,
+                completed: document.querySelector('#show-completed')?.checked
+            };
+            filterTasks(currentFilters);
+        });
+    });
+
+    // Add data-priority attributes to priority badges
+    document.querySelector('.priority-badge.high').dataset.priority = 'high';
+    document.querySelector('.priority-badge.medium').dataset.priority = 'medium';
+    document.querySelector('.priority-badge.low').dataset.priority = 'low';
 
     // Check authentication status
     const token = localStorage.getItem('authToken');
