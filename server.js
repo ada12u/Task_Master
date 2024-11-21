@@ -8,6 +8,9 @@ const nodemailer = require('nodemailer');
 const path = require('path');
 const rateLimit = require('express-rate-limit');
 
+// Import models
+const User = require('./models/User');
+
 const app = express();
 const PORT = process.env.PORT || 8080;
 
@@ -51,31 +54,111 @@ mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/taskmaste
 .then(() => console.log('Connected to MongoDB'))
 .catch(err => console.error('MongoDB connection error:', err));
 
-// Models
-const userSchema = new mongoose.Schema({
-    name: { type: String, required: true },
-    email: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
-    isVerified: { type: Boolean, default: false },
-    verificationToken: String,
-    verificationTokenExpires: Date,
-    createdAt: { type: Date, default: Date.now }
+// User Registration
+app.post('/api/users/register', async (req, res) => {
+    try {
+        console.log('Registration request received:', req.body);
+
+        const { name, email, password } = req.body;
+
+        // Validate required fields
+        if (!name || !email || !password) {
+            return res.status(400).json({ error: 'All fields are required' });
+        }
+
+        // Check if user already exists
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ error: 'Email already registered' });
+        }
+
+        // Hash password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        // Create new user
+        const user = new User({
+            name,
+            email,
+            password: hashedPassword,
+            isVerified: true // Temporarily set to true for testing
+        });
+
+        await user.save();
+        console.log('User saved to database:', user);
+
+        // Create JWT token
+        const token = jwt.sign(
+            { userId: user._id },
+            process.env.JWT_SECRET || 'your-secret-key',
+            { expiresIn: '7d' }
+        );
+
+        res.status(201).json({
+            message: 'Registration successful',
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email
+            },
+            token
+        });
+
+    } catch (error) {
+        console.error('Registration error:', error);
+        res.status(500).json({ error: 'Registration failed' });
+    }
 });
 
-const taskSchema = new mongoose.Schema({
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-    title: { type: String, required: true },
-    description: { type: String },
-    deadline: { type: Date, required: true },
-    priority: { type: String, enum: ['low', 'medium', 'high'], required: true },
-    completed: { type: Boolean, default: false },
-    categories: [{ type: String }],
-    tags: [{ type: String }],
-    createdAt: { type: Date, default: Date.now }
-});
+// User Login
+app.post('/api/users/login', async (req, res) => {
+    try {
+        console.log('Login request received:', req.body);
 
-const User = mongoose.model('User', userSchema);
-const Task = mongoose.model('Task', taskSchema);
+        const { email, password } = req.body;
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Email and password are required' });
+        }
+
+        // Find user
+        const user = await User.findOne({ email });
+        console.log('User found:', user ? 'Yes' : 'No');
+
+        if (!user) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        // Check password
+        const isValidPassword = await bcrypt.compare(password, user.password);
+        console.log('Password valid:', isValidPassword);
+
+        if (!isValidPassword) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        // Create token
+        const token = jwt.sign(
+            { userId: user._id },
+            process.env.JWT_SECRET || 'your-secret-key',
+            { expiresIn: '7d' }
+        );
+
+        // Send response
+        res.json({
+            message: 'Login successful',
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email
+            },
+            token
+        });
+
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({ error: 'Login failed' });
+    }
+});
 
 // Email Configuration
 const transporter = nodemailer.createTransport({
@@ -153,231 +236,6 @@ const auth = async (req, res, next) => {
         res.status(401).send({ error: 'Please authenticate.' });
     }
 };
-
-// Routes
-// User Registration
-app.post('/api/users/register', async (req, res) => {
-    try {
-        console.log('Registration request body:', req.body);
-        
-        // Check if request body is empty
-        if (!req.body || Object.keys(req.body).length === 0) {
-            console.error('Empty request body received');
-            return res.status(400).json({ error: 'Request body is empty' });
-        }
-
-        const { name, email, password } = req.body;
-
-        // Check if all required fields are present
-        if (!name || !email || !password) {
-            console.error('Missing required fields:', { name: !!name, email: !!email, password: !!password });
-            return res.status(400).json({ error: 'All fields are required' });
-        }
-
-        // Validate email format
-        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-        if (!emailRegex.test(email)) {
-            console.log('Invalid email format:', email);
-            return res.status(400).json({ error: 'Invalid email format' });
-        }
-
-        // Validate password
-        const passwordError = validatePassword(password);
-        if (passwordError) {
-            console.log('Password validation failed:', passwordError);
-            return res.status(400).json({ error: passwordError });
-        }
-
-        // Check if user already exists
-        const existingUser = await User.findOne({ email });
-        if (existingUser) {
-            console.log('Email already registered:', email);
-            return res.status(400).json({ error: 'Email already registered' });
-        }
-
-        // Hash password
-        const salt = await bcrypt.genSalt(12);
-        const hashedPassword = await bcrypt.hash(password, salt);
-
-        // Create verification token
-        const verificationToken = jwt.sign(
-            { email },
-            process.env.JWT_SECRET,
-            { expiresIn: '24h' }
-        );
-
-        // Create new user
-        const user = new User({
-            name,
-            email,
-            password: hashedPassword,
-            verificationToken,
-            verificationTokenExpires: Date.now() + 24 * 60 * 60 * 1000 // 24 hours
-        });
-
-        await user.save();
-        console.log('User created successfully:', { name, email });
-
-        // Create JWT token
-        const token = jwt.sign(
-            { userId: user._id },
-            process.env.JWT_SECRET,
-            { expiresIn: '7d' }
-        );
-
-        // Send success response first
-        res.status(201).json({
-            message: 'Registration successful',
-            user: {
-                id: user._id,
-                name: user.name,
-                email: user.email
-            },
-            token
-        });
-
-        // Then try to send verification email (non-blocking)
-        try {
-            await sendVerificationEmail(user, verificationToken);
-            console.log('Verification email sent successfully');
-        } catch (emailError) {
-            console.error('Error sending verification email:', emailError);
-            // Don't let email errors affect the registration response
-        }
-    } catch (error) {
-        console.error('Registration error:', error);
-        res.status(500).json({ error: 'Registration failed. Please try again.' });
-    }
-});
-
-// Email Verification Endpoint
-app.get('/api/users/verify/:token', async (req, res) => {
-    try {
-        const { token } = req.params;
-        
-        // Verify token
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        
-        // Find and update user
-        const user = await User.findOne({
-            email: decoded.email,
-            verificationToken: token,
-            verificationTokenExpires: { $gt: Date.now() }
-        });
-
-        if (!user) {
-            return res.status(400).json({
-                error: 'Invalid or expired verification token'
-            });
-        }
-
-        // Update user verification status
-        user.isVerified = true;
-        user.verificationToken = undefined;
-        user.verificationTokenExpires = undefined;
-        await user.save();
-
-        res.status(200).json({
-            message: 'Email verified successfully. You can now log in.'
-        });
-
-    } catch (error) {
-        console.error('Verification error:', error);
-        res.status(500).json({
-            error: 'Email verification failed. Please try again.'
-        });
-    }
-});
-
-// User Login
-app.post('/api/users/login', async (req, res) => {
-    try {
-        console.log('Login request received:', req.body);
-
-        // Check if request body is empty
-        if (!req.body || Object.keys(req.body).length === 0) {
-            console.error('Empty request body received');
-            return res.status(400).json({ error: 'Request body is empty' });
-        }
-
-        const { email, password } = req.body;
-
-        // Check if all required fields are present
-        if (!email || !password) {
-            console.error('Missing required fields:', { email: !!email, password: !!password });
-            return res.status(400).json({ error: 'Email and password are required' });
-        }
-
-        const user = await User.findOne({ email });
-        console.log('User found:', user ? 'Yes' : 'No');
-
-        if (!user) {
-            console.log('Invalid credentials - user not found');
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-
-        // Temporarily disable email verification check for testing
-        /*if (!user.isVerified) {
-            console.log('User not verified:', email);
-            return res.status(401).json({
-                error: 'Please verify your email before logging in'
-            });
-        }*/
-
-        const isValidPassword = await bcrypt.compare(password, user.password);
-        console.log('Password valid:', isValidPassword);
-
-        if (!isValidPassword) {
-            console.log('Invalid credentials - wrong password');
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-
-        const token = jwt.sign(
-            { userId: user._id },
-            process.env.JWT_SECRET,
-            { expiresIn: '7d' }
-        );
-
-        const response = {
-            message: 'Login successful',
-            user: {
-                id: user._id,
-                name: user.name,
-                email: user.email
-            },
-            token
-        };
-
-        console.log('Sending successful login response');
-        res.json(response);
-
-    } catch (error) {
-        console.error('Login error:', error);
-        res.status(500).json({ error: 'Login failed. Please try again.' });
-    }
-});
-
-// Token verification endpoint
-app.get('/api/users/verify-token', auth, async (req, res) => {
-    try {
-        const user = await User.findById(req.user.userId);
-        if (!user) {
-            return res.status(401).json({ error: 'User not found' });
-        }
-        
-        res.json({
-            user: {
-                id: user._id,
-                name: user.name,
-                email: user.email,
-                isVerified: user.isVerified
-            }
-        });
-    } catch (error) {
-        console.error('Token verification error:', error);
-        res.status(401).json({ error: 'Invalid token' });
-    }
-});
 
 // Task Routes with RESTful principles
 // GET /api/tasks - Get all tasks for a user
