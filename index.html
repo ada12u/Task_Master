@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TaskMaster - Modern Task Management</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Auth Section -->
+        <div id="auth-section" class="auth-section">
+            <div class="auth-container">
+                <h2>TaskMaster</h2>
+                <div class="auth-tabs">
+                    <button class="auth-tab active" onclick="showLoginForm()">Login</button>
+                    <button class="auth-tab" onclick="showRegisterForm()">Register</button>
+                </div>
+                
+                <!-- Login Form -->
+                <form id="login-form" class="auth-form">
+                    <input type="email" name="email" placeholder="Email" required>
+                    <input type="password" name="password" placeholder="Password" required>
+                    <button type="submit" class="btn-primary">Login</button>
+                </form>
+
+                <!-- Register Form -->
+                <form id="register-form" class="auth-form hidden">
+                    <input type="text" name="name" placeholder="Full Name" required>
+                    <input type="email" name="email" placeholder="Email" required>
+                    <input type="password" name="password" placeholder="Password" required>
+                    <input type="password" name="confirmPassword" placeholder="Confirm Password" required>
+                    <button type="submit" class="btn-primary">Register</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Main App Section -->
+        <div id="app-section" class="app-section hidden">
+            <!-- Sidebar -->
+            <div class="sidebar">
+                <h2>TaskMaster</h2>
+                <div class="user-info">
+                    <img src="https://via.placeholder.com/40" alt="User" class="user-avatar">
+                    <span id="user-name">John Doe</span>
+                </div>
+                <nav>
+                    <ul>
+                        <li class="active"><i class="fas fa-tasks"></i> All Tasks</li>
+                        <li><i class="fas fa-star"></i> Important</li>
+                        <li><i class="fas fa-calendar"></i> Today</li>
+                        <li><i class="fas fa-calendar-week"></i> Upcoming</li>
+                    </ul>
+                </nav>
+                <button class="btn-logout" onclick="logout()">
+                    <i class="fas fa-sign-out-alt"></i> Logout
+                </button>
+            </div>
+
+            <!-- Main Content -->
+            <div class="main-content">
+                <div class="app-header">
+                    <h1>TaskMaster</h1>
+                    <div class="header-actions">
+                        <button class="btn-logout" onclick="logout()">
+                            <i class="fas fa-sign-out-alt"></i> Logout
+                        </button>
+                        <button class="add-task-btn" onclick="showAddTaskModal()">
+                            <i class="fas fa-plus"></i>
+                            Add Task
+                        </button>
+                    </div>
+                </div>
+                <div class="top-bar">
+                    <div class="search-box">
+                        <i class="fas fa-search"></i>
+                        <input type="text" placeholder="Search tasks..." id="search-input">
+                    </div>
+                </div>
+
+                <div class="task-filters">
+                    <div class="filter-group">
+                        <label>Sort by:</label>
+                        <select id="sort-tasks">
+                            <option value="deadline">Deadline</option>
+                            <option value="priority">Priority</option>
+                            <option value="created">Created Date</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <label>Filter:</label>
+                        <div class="priority-filters">
+                            <span class="priority-badge high">High</span>
+                            <span class="priority-badge medium">Medium</span>
+                            <span class="priority-badge low">Low</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="tasks-container" class="tasks-grid">
+                    <!-- Tasks will be dynamically added here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Add Task Modal -->
+        <div id="add-task-modal" class="modal">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2>Add New Task</h2>
+                    <button class="close-btn" onclick="hideAddTaskModal()">&times;</button>
+                </div>
+                <form id="add-task-form">
+                    <div class="form-group">
+                        <label for="task-title">Title</label>
+                        <input type="text" id="task-title" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="task-description">Description</label>
+                        <textarea id="task-description" required></textarea>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="task-deadline">Deadline</label>
+                            <input type="datetime-local" id="task-deadline" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="task-priority">Priority</label>
+                            <select id="task-priority" required>
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn-secondary" onclick="hideAddTaskModal()">Cancel</button>
+                        <button type="submit" class="btn-primary">Add Task</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <template id="task-template">
+            <div class="task-card">
+                <div class="task-header">
+                    <h3 class="task-title"></h3>
+                    <div class="task-actions">
+                        <button class="complete-btn" onclick="toggleTaskComplete(this.closest('.task-card').dataset.taskId)">
+                            <i class="fas fa-check"></i>
+                        </button>
+                        <button class="delete-btn" onclick="deleteTask(this.closest('.task-card').dataset.taskId)">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="task-description"></div>
+                <div class="task-meta">
+                    <span class="deadline"></span>
+                    <span class="priority"></span>
+                </div>
+                <div class="task-tags">
+                    <div class="categories"></div>
+                    <div class="tags"></div>
+                </div>
+            </div>
+        </template>
+    </div>
+    <script src="script.js"></script>
+</body>
+</html>
