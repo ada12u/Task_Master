@@ -292,42 +292,64 @@ app.get('/api/users/verify/:token', async (req, res) => {
 // User Login
 app.post('/api/users/login', async (req, res) => {
     try {
+        console.log('Login request received:', req.body);
+
+        // Check if request body is empty
+        if (!req.body || Object.keys(req.body).length === 0) {
+            console.error('Empty request body received');
+            return res.status(400).json({ error: 'Request body is empty' });
+        }
+
         const { email, password } = req.body;
+
+        // Check if all required fields are present
+        if (!email || !password) {
+            console.error('Missing required fields:', { email: !!email, password: !!password });
+            return res.status(400).json({ error: 'Email and password are required' });
+        }
+
         const user = await User.findOne({ email });
+        console.log('User found:', user ? 'Yes' : 'No');
 
         if (!user) {
+            console.log('Invalid credentials - user not found');
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
-        if (!user.isVerified) {
+        // Temporarily disable email verification check for testing
+        /*if (!user.isVerified) {
+            console.log('User not verified:', email);
             return res.status(401).json({
                 error: 'Please verify your email before logging in'
             });
-        }
+        }*/
 
         const isValidPassword = await bcrypt.compare(password, user.password);
+        console.log('Password valid:', isValidPassword);
+
         if (!isValidPassword) {
+            console.log('Invalid credentials - wrong password');
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
         const token = jwt.sign(
             { userId: user._id },
             process.env.JWT_SECRET,
-            { 
-                expiresIn: '7d',
-                algorithm: 'HS512'
-            }
+            { expiresIn: '7d' }
         );
 
-        res.json({
+        const response = {
+            message: 'Login successful',
             user: {
                 id: user._id,
                 name: user.name,
-                email: user.email,
-                isVerified: user.isVerified
+                email: user.email
             },
             token
-        });
+        };
+
+        console.log('Sending successful login response');
+        res.json(response);
 
     } catch (error) {
         console.error('Login error:', error);

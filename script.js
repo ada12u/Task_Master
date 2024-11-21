@@ -15,29 +15,47 @@ const api = {
                 ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
             };
 
-            console.log('Making request to:', `${API_BASE_URL}${endpoint}`);
-            console.log('Request options:', { ...options, headers });
-
-            const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+            const url = `${API_BASE_URL}${endpoint}`;
+            console.log('Making request to:', url);
+            console.log('Request options:', {
                 method: options.method || 'GET',
                 headers,
                 body: options.body
             });
 
+            const response = await fetch(url, {
+                method: options.method || 'GET',
+                headers,
+                body: options.body,
+                mode: 'cors',
+                credentials: 'same-origin'
+            });
+
             console.log('Response status:', response.status);
-            
+            console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
+            // First try to get the raw text
+            const text = await response.text();
+            console.log('Raw response text:', text);
+
+            // If the response is empty, return an empty object
+            if (!text) {
+                console.log('Empty response received');
+                return {};
+            }
+
             try {
-                const data = await response.json();
-                console.log('Response data:', data);
+                const data = JSON.parse(text);
+                console.log('Parsed response data:', data);
 
                 if (!response.ok) {
-                    throw new Error(data.error || 'Something went wrong');
+                    throw new Error(data.error || 'Request failed');
                 }
 
                 return data;
             } catch (jsonError) {
                 console.error('JSON parsing error:', jsonError);
-                throw new Error('Server response was not in the expected format');
+                throw new Error('Invalid server response');
             }
         } catch (error) {
             console.error(`API Error (${endpoint}):`, error);
@@ -47,18 +65,35 @@ const api = {
 
     // Auth endpoints
     async login(email, password) {
-        const data = await this.request('/api/users/login', {
-            method: 'POST',
-            body: JSON.stringify({ email, password })
-        });
-        authToken = data.token;
-        currentUser = data.user;
-        localStorage.setItem('authToken', authToken);
-        localStorage.setItem('USER_STORAGE_KEY', JSON.stringify(currentUser));
-        return data;
+        try {
+            console.log('Attempting login for email:', email);
+            const data = await this.request('/api/users/login', {
+                method: 'POST',
+                body: JSON.stringify({ email, password })
+            });
+            
+            console.log('Login response:', data);
+            
+            if (data.token && data.user) {
+                authToken = data.token;
+                currentUser = data.user;
+                localStorage.setItem('authToken', authToken);
+                localStorage.setItem('USER_STORAGE_KEY', JSON.stringify(currentUser));
+                console.log('Login successful, token stored');
+            } else {
+                console.error('Invalid login response format:', data);
+                throw new Error('Invalid login response from server');
+            }
+            
+            return data;
+        } catch (error) {
+            console.error('Login error:', error);
+            throw error;
+        }
     },
 
     async register(name, email, password) {
+        console.log('Registering user:', { name, email });
         const data = await this.request('/api/users/register', {
             method: 'POST',
             body: JSON.stringify({ name, email, password })
