@@ -158,8 +158,21 @@ const auth = async (req, res, next) => {
 // User Registration
 app.post('/api/users/register', async (req, res) => {
     try {
-        console.log('Registration request received:', req.body);
+        console.log('Registration request body:', req.body);
+        
+        // Check if request body is empty
+        if (!req.body || Object.keys(req.body).length === 0) {
+            console.error('Empty request body received');
+            return res.status(400).json({ error: 'Request body is empty' });
+        }
+
         const { name, email, password } = req.body;
+
+        // Check if all required fields are present
+        if (!name || !email || !password) {
+            console.error('Missing required fields:', { name: !!name, email: !!email, password: !!password });
+            return res.status(400).json({ error: 'All fields are required' });
+        }
 
         // Validate email format
         const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -204,35 +217,33 @@ app.post('/api/users/register', async (req, res) => {
 
         await user.save();
         console.log('User created successfully:', { name, email });
-        
-        // Send verification email
-        try {
-            await sendVerificationEmail(user, verificationToken);
-            console.log('Verification email sent successfully');
-        } catch (emailError) {
-            console.error('Error sending verification email:', emailError);
-            // Continue with registration even if email fails
-        }
 
         // Create JWT token
         const token = jwt.sign(
             { userId: user._id },
             process.env.JWT_SECRET,
-            { 
-                expiresIn: '7d',
-                algorithm: 'HS512'
-            }
+            { expiresIn: '7d' }
         );
 
+        // Send success response first
         res.status(201).json({
             message: 'Registration successful',
-            token,
             user: {
                 id: user._id,
                 name: user.name,
                 email: user.email
-            }
+            },
+            token
         });
+
+        // Then try to send verification email (non-blocking)
+        try {
+            await sendVerificationEmail(user, verificationToken);
+            console.log('Verification email sent successfully');
+        } catch (emailError) {
+            console.error('Error sending verification email:', emailError);
+            // Don't let email errors affect the registration response
+        }
     } catch (error) {
         console.error('Registration error:', error);
         res.status(500).json({ error: 'Registration failed. Please try again.' });
