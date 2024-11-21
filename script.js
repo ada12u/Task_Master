@@ -22,11 +22,23 @@ const api = {
 
             const response = await fetch(`${API_BASE_URL}${endpoint}`, {
                 ...options,
-                headers
+                headers,
+                mode: 'cors',
+                credentials: 'include'
             });
 
             console.log('Response status:', response.status);
-            const data = await response.json();
+            
+            let data;
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                data = await response.json();
+            } else {
+                const text = await response.text();
+                console.error('Non-JSON response:', text);
+                throw new Error('Invalid response format from server');
+            }
+            
             console.log('Response data:', data);
 
             if (!response.ok) {
@@ -36,6 +48,9 @@ const api = {
             return data;
         } catch (error) {
             console.error(`API Error (${endpoint}):`, error);
+            if (error instanceof SyntaxError) {
+                throw new Error('Invalid response from server. Please try again.');
+            }
             throw error;
         }
     },
