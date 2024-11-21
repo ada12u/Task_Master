@@ -1,7 +1,5 @@
 // API Configuration
-const API_BASE_URL = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-    ? 'http://localhost:8080'
-    : 'https://task-masters.onrender.com';
+const API_BASE_URL = 'https://task-masters.onrender.com';
 
 // State Management
 let authToken = localStorage.getItem('authToken');
@@ -14,7 +12,6 @@ const api = {
         try {
             const headers = {
                 'Content-Type': 'application/json',
-                'Accept': 'application/json',
                 ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
             };
 
@@ -22,9 +19,9 @@ const api = {
             console.log('Request options:', { ...options, headers });
 
             const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-                ...options,
+                method: options.method || 'GET',
                 headers,
-                mode: 'cors'
+                body: options.body
             });
 
             console.log('Response status:', response.status);
@@ -40,8 +37,6 @@ const api = {
                 return data;
             } catch (jsonError) {
                 console.error('JSON parsing error:', jsonError);
-                const textResponse = await response.text();
-                console.error('Raw response:', textResponse);
                 throw new Error('Server response was not in the expected format');
             }
         } catch (error) {

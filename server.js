@@ -19,15 +19,17 @@ const limiter = rateLimit({
 
 // Middleware
 app.use(limiter);
-app.use(cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
-    credentials: true,
-    exposedHeaders: ['Content-Type']
-}));
-
+app.use(cors());
 app.use(express.json());
+
+// Add logging middleware
+app.use((req, res, next) => {
+    console.log(`${req.method} ${req.path}`, {
+        body: req.body,
+        headers: req.headers
+    });
+    next();
+});
 
 // Serve static files from the root directory
 app.use(express.static(path.join(__dirname)));
@@ -35,12 +37,6 @@ app.use(express.static(path.join(__dirname)));
 // Serve index.html for the root route
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-// Add logging middleware
-app.use((req, res, next) => {
-    console.log(`${req.method} ${req.path}`, req.body);
-    next();
 });
 
 // Apply rate limiting to registration and login routes
