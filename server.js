@@ -10,22 +10,20 @@ const rateLimit = require('express-rate-limit');
 
 // Import models
 const User = require('./models/User');
+const Task = require('./models/Task');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Rate limiting
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100 // limit each IP to 100 requests per windowMs
-});
+// CORS configuration
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 
 // Middleware
-app.use(limiter);
-app.use(cors());
 app.use(express.json());
-
-// Add logging middleware
 app.use((req, res, next) => {
     console.log(`${req.method} ${req.path}`, {
         body: req.body,
@@ -34,25 +32,32 @@ app.use((req, res, next) => {
     next();
 });
 
-// Serve static files from the root directory
-app.use(express.static(path.join(__dirname)));
-
-// Serve index.html for the root route
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
+// Rate limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100 // limit each IP to 100 requests per windowMs
 });
 
-// Apply rate limiting to registration and login routes
-app.use('/api/users/register', limiter);
-app.use('/api/users/login', limiter);
+// Apply rate limiting to all routes
+app.use(limiter);
 
 // MongoDB Connection
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/taskmaster', {
+console.log('Attempting to connect to MongoDB...');
+mongoose.connect(process.env.MONGODB_URI, {
     useNewUrlParser: true,
     useUnifiedTopology: true
 })
-.then(() => console.log('Connected to MongoDB'))
-.catch(err => console.error('MongoDB connection error:', err));
+.then(() => {
+    console.log('Successfully connected to MongoDB');
+    // Test database connection by counting users
+    User.countDocuments()
+        .then(count => console.log('Number of users in database:', count))
+        .catch(err => console.error('Error counting users:', err));
+})
+.catch(err => {
+    console.error('MongoDB connection error:', err);
+    process.exit(1); // Exit if we can't connect to database
+});
 
 // User Registration
 app.post('/api/users/register', async (req, res) => {
@@ -63,11 +68,14 @@ app.post('/api/users/register', async (req, res) => {
 
         // Validate required fields
         if (!name || !email || !password) {
+            console.error('Missing required fields:', { name: !!name, email: !!email, password: !!password });
             return res.status(400).json({ error: 'All fields are required' });
         }
 
         // Check if user already exists
         const existingUser = await User.findOne({ email });
+        console.log('Existing user check:', existingUser ? 'User exists' : 'User does not exist');
+
         if (existingUser) {
             return res.status(400).json({ error: 'Email already registered' });
         }
@@ -75,6 +83,7 @@ app.post('/api/users/register', async (req, res) => {
         // Hash password
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
+        console.log('Password hashed successfully');
 
         // Create new user
         const user = new User({
@@ -84,29 +93,31 @@ app.post('/api/users/register', async (req, res) => {
             isVerified: true // Temporarily set to true for testing
         });
 
-        await user.save();
-        console.log('User saved to database:', user);
+        // Save user to database
+        const savedUser = await user.save();
+        console.log('User saved successfully:', savedUser._id);
 
         // Create JWT token
         const token = jwt.sign(
-            { userId: user._id },
-            process.env.JWT_SECRET || 'your-secret-key',
+            { userId: savedUser._id },
+            process.env.JWT_SECRET,
             { expiresIn: '7d' }
         );
 
+        console.log('Sending registration response');
         res.status(201).json({
             message: 'Registration successful',
             user: {
-                id: user._id,
-                name: user.name,
-                email: user.email
+                id: savedUser._id,
+                name: savedUser.name,
+                email: savedUser.email
             },
             token
         });
 
     } catch (error) {
         console.error('Registration error:', error);
-        res.status(500).json({ error: 'Registration failed' });
+        res.status(500).json({ error: 'Registration failed: ' + error.message });
     }
 });
 
@@ -117,12 +128,13 @@ app.post('/api/users/login', async (req, res) => {
 
         const { email, password } = req.body;
         if (!email || !password) {
+            console.error('Missing credentials:', { email: !!email, password: !!password });
             return res.status(400).json({ error: 'Email and password are required' });
         }
 
         // Find user
         const user = await User.findOne({ email });
-        console.log('User found:', user ? 'Yes' : 'No');
+        console.log('User lookup result:', user ? 'Found' : 'Not found');
 
         if (!user) {
             return res.status(401).json({ error: 'Invalid credentials' });
@@ -130,7 +142,7 @@ app.post('/api/users/login', async (req, res) => {
 
         // Check password
         const isValidPassword = await bcrypt.compare(password, user.password);
-        console.log('Password valid:', isValidPassword);
+        console.log('Password validation result:', isValidPassword);
 
         if (!isValidPassword) {
             return res.status(401).json({ error: 'Invalid credentials' });
@@ -139,12 +151,12 @@ app.post('/api/users/login', async (req, res) => {
         // Create token
         const token = jwt.sign(
             { userId: user._id },
-            process.env.JWT_SECRET || 'your-secret-key',
+            process.env.JWT_SECRET,
             { expiresIn: '7d' }
         );
 
-        // Send response
-        res.json({
+        // Prepare response
+        const response = {
             message: 'Login successful',
             user: {
                 id: user._id,
@@ -152,11 +164,14 @@ app.post('/api/users/login', async (req, res) => {
                 email: user.email
             },
             token
-        });
+        };
+
+        console.log('Sending login response:', response);
+        return res.json(response);
 
     } catch (error) {
         console.error('Login error:', error);
-        res.status(500).json({ error: 'Login failed' });
+        return res.status(500).json({ error: 'Login failed: ' + error.message });
     }
 });
 
@@ -222,7 +237,7 @@ const sendVerificationEmail = async (user, token) => {
 const auth = async (req, res, next) => {
     try {
         const token = req.header('Authorization').replace('Bearer ', '');
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
         const user = await User.findById(decoded.userId);
         
         if (!user) {

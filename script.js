@@ -27,67 +27,61 @@ const api = {
                 method: options.method || 'GET',
                 headers,
                 body: options.body,
-                mode: 'cors',
-                credentials: 'same-origin'
+                mode: 'cors'
             });
 
             console.log('Response status:', response.status);
             console.log('Response headers:', Object.fromEntries(response.headers.entries()));
 
-            // First try to get the raw text
             const text = await response.text();
             console.log('Raw response text:', text);
 
-            // If the response is empty, return an empty object
-            if (!text) {
-                console.log('Empty response received');
-                return {};
-            }
-
+            let data;
             try {
-                const data = JSON.parse(text);
+                data = text ? JSON.parse(text) : null;
                 console.log('Parsed response data:', data);
-
-                if (!response.ok) {
-                    throw new Error(data.error || 'Request failed');
-                }
-
-                return data;
-            } catch (jsonError) {
-                console.error('JSON parsing error:', jsonError);
-                throw new Error('Invalid server response');
+            } catch (e) {
+                console.error('JSON parse error:', e);
+                throw new Error('Invalid response format');
             }
+
+            if (!response.ok) {
+                throw new Error(data?.error || 'Request failed');
+            }
+
+            if (!data) {
+                throw new Error('Empty response received');
+            }
+
+            return data;
         } catch (error) {
             console.error(`API Error (${endpoint}):`, error);
             throw error;
         }
     },
 
-    // Auth endpoints
     async login(email, password) {
         try {
-            console.log('Attempting login for email:', email);
+            console.log('Attempting login for:', email);
             const data = await this.request('/api/users/login', {
                 method: 'POST',
                 body: JSON.stringify({ email, password })
             });
-            
-            console.log('Login response:', data);
-            
-            if (data.token && data.user) {
-                authToken = data.token;
-                currentUser = data.user;
-                localStorage.setItem('authToken', authToken);
-                localStorage.setItem('USER_STORAGE_KEY', JSON.stringify(currentUser));
-                console.log('Login successful, token stored');
-            } else {
-                console.error('Invalid login response format:', data);
-                throw new Error('Invalid login response from server');
+
+            if (!data || !data.token || !data.user) {
+                console.error('Invalid login response:', data);
+                throw new Error('Invalid server response');
             }
-            
+
+            console.log('Login successful');
+            authToken = data.token;
+            currentUser = data.user;
+            localStorage.setItem('authToken', authToken);
+            localStorage.setItem('USER_STORAGE_KEY', JSON.stringify(currentUser));
+
             return data;
         } catch (error) {
-            console.error('Login error:', error);
+            console.error('Login failed:', error);
             throw error;
         }
     },
@@ -102,7 +96,6 @@ const api = {
         return data;
     },
 
-    // Task endpoints
     async getTasks() {
         return await this.request('/api/tasks');
     },
