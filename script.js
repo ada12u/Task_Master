@@ -47,75 +47,117 @@ const api = {
             let response;
             try {
                 response = await fetch(url, requestOptions);
+                
+                // Retry on 5xx server errors
+                if (response.status >= 500 && retries > 0) {
+                    console.log(`Server error (${response.status}), retrying... (${retries} attempts left)`);
+                    const backoffTime = Math.min(1000 * (2 ** (3 - retries)), 5000); // Exponential backoff, max 5 seconds
+                    await new Promise(resolve => setTimeout(resolve, backoffTime));
+                    return this.request(endpoint, options, retries - 1);
+                }
+                
+                // Handle rate limiting (429)
+                if (response.status === 429 && retries > 0) {
+                    const retryAfter = response.headers.get('Retry-After') || 5;
+                    console.log(`Rate limited, retrying after ${retryAfter} seconds... (${retries} attempts left)`);
+                    await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+                    return this.request(endpoint, options, retries - 1);
+                }
+
             } catch (networkError) {
                 if (retries > 0) {
                     console.log(`Network error, retrying... (${retries} attempts left)`);
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    const backoffTime = Math.min(1000 * (2 ** (3 - retries)), 5000); // Exponential backoff, max 5 seconds
+                    await new Promise(resolve => setTimeout(resolve, backoffTime));
                     return this.request(endpoint, options, retries - 1);
                 }
-                throw new Error('Network error: Unable to connect to the server');
+                throw new Error('Network error: Unable to connect to the server after multiple attempts');
+            }
+
+            // Parse response
+            let data;
+            try {
+                data = await response.json();
+            } catch (parseError) {
+                console.error('Error parsing response:', parseError);
+                throw new Error('Invalid response format from server');
+            }
+
+            // Check if the response is an error
+            if (!response.ok) {
+                const error = new Error(data.message || 'An error occurred');
+                error.response = response;
+                error.data = data;
+                throw error;
             }
 
             console.log('Response status:', response.status);
             console.log('Response headers:', Object.fromEntries(response.headers.entries()));
 
-            if (response.status === 503 && retries > 0) {
-                console.log(`Service unavailable, retrying... (${retries} attempts left)`);
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                return this.request(endpoint, options, retries - 1);
-            }
-
-            const text = await response.text();
-            console.log('Raw response text:', text);
-
-            let data = null;
-            try {
-                data = text ? JSON.parse(text) : null;
-                console.log('Parsed response data:', data);
-            } catch (e) {
-                console.error('JSON parse error:', e);
-                throw new Error('Invalid response format');
-            }
-
-            if (!response.ok) {
-                const error = new Error(data?.error || `Request failed with status ${response.status}`);
-                error.status = response.status;
-                error.data = data;
-                throw error;
-            }
-
             return data;
         } catch (error) {
             console.error('API request error:', error);
-            if (error.status === 401) {
-                // Handle unauthorized access
+            
+            // Handle network errors
+            if (error instanceof TypeError && error.message === 'Failed to fetch') {
+                throw new Error('Network error: Unable to connect to the server');
+            }
+
+            // Handle unauthorized access (401)
+            if (error.response && error.response.status === 401) {
                 localStorage.removeItem('authToken');
                 localStorage.removeItem('USER_STORAGE_KEY');
+                showError('Session expired. Please login again.');
                 window.location.reload();
+                throw new Error('Unauthorized: Please login again');
             }
+
+            // Handle forbidden access (403)
+            if (error.response && error.response.status === 403) {
+                showError('Access denied. You do not have permission to perform this action.');
+                throw new Error('Forbidden: Access denied');
+            }
+
+            // Handle server errors (500)
+            if (error.response && error.response.status >= 500) {
+                showError('Server error. Please try again later.');
+                throw new Error('Server error occurred');
+            }
+
+            // Handle other errors
+            const errorMessage = error.response?.data?.message || error.message || 'An unexpected error occurred';
+            showError(errorMessage);
             throw error;
         }
     },
 
     async login(email, password) {
         try {
-            const data = await this.request('/api/users/login', {
+            const response = await this.request('/api/users/login', {
                 method: 'POST',
                 body: JSON.stringify({ email, password })
             });
 
-            if (data.token) {
-                localStorage.setItem('authToken', data.token);
-                authToken = data.token;
-                if (data.user) {
-                    localStorage.setItem('USER_STORAGE_KEY', JSON.stringify(data.user));
-                    currentUser = data.user;
-                }
+            if (response.token) {
+                localStorage.setItem('authToken', response.token);
+                localStorage.setItem('USER_STORAGE_KEY', JSON.stringify(response.user));
+                return response;
+            } else {
+                throw new Error('Invalid response from server: No token received');
             }
-
-            return data;
         } catch (error) {
             console.error('Login failed:', error);
+            
+            if (error.message.includes('Network error')) {
+                showError('Unable to connect to the server. Please check your internet connection.');
+            } else if (error.message.includes('Invalid credentials')) {
+                showError('Invalid email or password. Please try again.');
+            } else if (error.message.includes('Invalid response')) {
+                showError('Server error: Invalid response received. Please try again later.');
+            } else {
+                showError('Login failed. Please try again.');
+            }
+            
             throw error;
         }
     }
