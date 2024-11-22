@@ -132,22 +132,67 @@ app.use('/api/', rateLimitConfig.standard);
 app.use('/api/users/login', rateLimitConfig.auth);
 app.use('/api/users/register', rateLimitConfig.auth);
 
-// MongoDB Connection
-console.log('Attempting to connect to MongoDB...');
-mongoose.connect(process.env.MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-})
-.then(() => {
-    console.log('Successfully connected to MongoDB');
-    // Test database connection by counting users
-    User.countDocuments()
-        .then(count => console.log('Number of users in database:', count))
-        .catch(err => console.error('Error counting users:', err));
-})
-.catch(err => {
-    console.error('MongoDB connection error:', err);
-    process.exit(1); // Exit if we can't connect to database
+// User Login
+app.post('/api/users/login', async (req, res) => {
+    try {
+        console.log('\n=== Login Attempt ===');
+        console.log('Request body:', req.body);
+
+        const { email, password } = req.body;
+
+        // Validate required fields
+        if (!email || !password) {
+            console.log('Missing required fields');
+            return res.status(400).json({ error: 'Email and password are required' });
+        }
+
+        // Find user by email
+        const user = await User.findOne({ email });
+        console.log('User found:', user ? 'Yes' : 'No');
+
+        if (!user) {
+            console.log('User not found');
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        // Check password
+        const isMatch = await bcrypt.compare(password, user.password);
+        console.log('Password match:', isMatch ? 'Yes' : 'No');
+
+        if (!isMatch) {
+            console.log('Invalid password');
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        // Check if user is verified
+        if (!user.isVerified) {
+            console.log('User not verified');
+            return res.status(401).json({ error: 'Please verify your email before logging in' });
+        }
+
+        // Create and sign JWT token
+        const token = jwt.sign(
+            { userId: user._id },
+            process.env.JWT_SECRET,
+            { expiresIn: '7d' }
+        );
+        console.log('JWT token created');
+
+        // Send response
+        res.json({
+            token,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email
+            }
+        });
+        console.log('Login successful');
+
+    } catch (error) {
+        console.error('Login error:', error);
+        res.status(500).json({ error: 'Server error during login' });
+    }
 });
 
 // User Registration
@@ -233,71 +278,6 @@ app.post('/api/users/register', async (req, res) => {
     } catch (error) {
         console.error('Registration error:', error);
         res.status(500).json({ error: 'Registration failed: ' + error.message });
-    }
-});
-
-// User Login
-app.post('/api/users/login', async (req, res) => {
-    try {
-        console.log('\n=== Login Attempt ===');
-        console.log('Request body:', req.body);
-
-        const { email, password } = req.body;
-
-        // Validate input
-        if (!email || !password) {
-            console.log('Missing credentials');
-            return res.status(400).json({ error: 'Email and password are required' });
-        }
-
-        // Find user
-        const user = await User.findOne({ email });
-        console.log('User found:', user ? 'Yes' : 'No');
-
-        if (!user) {
-            console.log('User not found');
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-
-        // Verify password
-        const isValidPassword = await bcrypt.compare(password, user.password);
-        console.log('Password valid:', isValidPassword);
-
-        if (!isValidPassword) {
-            console.log('Invalid password');
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-
-        // Check if email is verified
-        if (!user.isVerified) {
-            console.log('Email not verified');
-            return res.status(401).json({ error: 'Email not verified' });
-        }
-
-        // Create token
-        const token = jwt.sign(
-            { userId: user._id },
-            process.env.JWT_SECRET,
-            { expiresIn: '7d' }
-        );
-
-        // Prepare response
-        const response = {
-            message: 'Login successful',
-            user: {
-                id: user._id,
-                name: user.name,
-                email: user.email
-            },
-            token
-        };
-
-        console.log('Login successful, sending response');
-        return res.status(200).json(response);
-
-    } catch (error) {
-        console.error('Login error:', error);
-        return res.status(500).json({ error: 'Login failed: ' + error.message });
     }
 });
 
@@ -916,6 +896,24 @@ app.get('/api/health', (req, res) => {
         healthcheck.message = error;
         res.status(503).send();
     }
+});
+
+// MongoDB Connection
+console.log('Attempting to connect to MongoDB...');
+mongoose.connect(process.env.MONGODB_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true
+})
+.then(() => {
+    console.log('Successfully connected to MongoDB');
+    // Test database connection by counting users
+    User.countDocuments()
+        .then(count => console.log('Number of users in database:', count))
+        .catch(err => console.error('Error counting users:', err));
+})
+.catch(err => {
+    console.error('MongoDB connection error:', err);
+    process.exit(1); // Exit if we can't connect to database
 });
 
 // Start server
