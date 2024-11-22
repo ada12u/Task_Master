@@ -87,6 +87,56 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
+// Request logging middleware
+app.use((req, res, next) => {
+    const start = Date.now();
+    res.on('finish', () => {
+        const duration = Date.now() - start;
+        console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - ${res.statusCode} (${duration}ms)`);
+        
+        // Log additional details for errors
+        if (res.statusCode >= 400) {
+            console.log('Request Headers:', req.headers);
+            console.log('Request Body:', req.body);
+            console.log('Query Parameters:', req.query);
+        }
+    });
+    next();
+});
+
+// Health check endpoint with detailed status
+app.get('/health', async (req, res) => {
+    try {
+        // Check MongoDB connection
+        const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+        
+        // Basic memory usage
+        const memoryUsage = process.memoryUsage();
+        
+        res.status(200).json({
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+            server: {
+                uptime: process.uptime(),
+                memory: {
+                    heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024) + 'MB',
+                    heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024) + 'MB'
+                }
+            },
+            database: {
+                status: dbStatus
+            }
+        });
+    } catch (error) {
+        console.error('Health check error:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Health check failed',
+            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+        });
+    }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
     res.status(200).json({ status: 'ok', message: 'Server is running' });
@@ -107,31 +157,46 @@ app.use((req, res, next) => {
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error('Error:', err);
-    
+
+    // MongoDB errors
+    if (err.name === 'MongoError' || err.name === 'MongoServerError') {
+        return res.status(500).json({
+            success: false,
+            message: 'Database error occurred',
+            error: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
+        });
+    }
+
+    // Validation errors
     if (err.name === 'ValidationError') {
         return res.status(400).json({
-            error: 'Validation Error',
-            details: Object.values(err.errors).map(e => e.message)
+            success: false,
+            message: 'Validation error',
+            errors: Object.values(err.errors).map(e => e.message)
         });
     }
-    
-    if (err.name === 'MongoError' && err.code === 11000) {
-        return res.status(400).json({
-            error: 'Duplicate Error',
-            message: 'This email is already registered'
-        });
-    }
-    
-    if (err.name === 'JsonWebTokenError') {
+
+    // JWT errors
+    if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
         return res.status(401).json({
-            error: 'Authentication Error',
-            message: 'Invalid token'
+            success: false,
+            message: 'Invalid or expired token'
         });
     }
-    
-    res.status(500).json({
-        error: 'Server Error',
-        message: process.env.NODE_ENV === 'development' ? err.message : 'An unexpected error occurred'
+
+    // Default error
+    res.status(err.status || 500).json({
+        success: false,
+        message: err.message || 'Internal server error',
+        error: process.env.NODE_ENV === 'development' ? err : {}
+    });
+});
+
+// 404 handler
+app.use((req, res) => {
+    res.status(404).json({
+        success: false,
+        message: 'Route not found'
     });
 });
 
@@ -865,25 +930,54 @@ app.patch('/api/tasks/:id/toggle', auth, async (req, res) => {
 // MongoDB Connection
 const connectDB = async (retries = 5) => {
     try {
+        if (!process.env.MONGODB_URI) {
+            throw new Error('MONGODB_URI is not defined in environment variables');
+        }
+
+        console.log('Connecting to MongoDB...');
         const conn = await mongoose.connect(process.env.MONGODB_URI, {
             useNewUrlParser: true,
             useUnifiedTopology: true,
-            serverSelectionTimeoutMS: 5000,
+            serverSelectionTimeoutMS: 10000, // Timeout after 10 seconds
+            socketTimeoutMS: 45000, // Close sockets after 45 seconds
+            family: 4, // Use IPv4, skip trying IPv6
+            maxPoolSize: 50,
+            connectTimeoutMS: 10000,
         });
+
         console.log(`MongoDB Connected: ${conn.connection.host}`);
         
         // Test database connection
-        await User.countDocuments();
-        console.log('Database connection test successful');
+        try {
+            await User.countDocuments();
+            console.log('Database connection test successful');
+        } catch (testError) {
+            console.error('Database test failed:', testError);
+            throw testError;
+        }
         
+        // Set up connection error handler
+        mongoose.connection.on('error', err => {
+            console.error('MongoDB connection error:', err);
+        });
+
+        // Handle disconnection
+        mongoose.connection.on('disconnected', () => {
+            console.log('MongoDB disconnected. Attempting to reconnect...');
+            setTimeout(() => connectDB(retries), 5000);
+        });
+
         return conn;
     } catch (error) {
         console.error('MongoDB connection error:', error);
+        
         if (retries > 0) {
             console.log(`Retrying connection... (${retries} attempts left)`);
             await new Promise(resolve => setTimeout(resolve, 5000));
             return connectDB(retries - 1);
         }
+        
+        console.error('Failed to connect to MongoDB after multiple attempts');
         process.exit(1);
     }
 };
@@ -892,33 +986,40 @@ const connectDB = async (retries = 5) => {
 connectDB().then(() => {
     const server = app.listen(PORT, () => {
         console.log(`Server is running on port ${PORT}`);
+        console.log(`Environment: ${process.env.NODE_ENV}`);
+        console.log(`Frontend URL: ${process.env.FRONTEND_URL}`);
     }).on('error', (err) => {
+        console.error('Server startup error:', err);
         if (err.code === 'EADDRINUSE') {
             console.log(`Port ${PORT} is in use, trying another port...`);
             setTimeout(() => {
                 server.close();
-                app.listen(0);
+                app.listen(0, () => {
+                    console.log(`Server is running on random port ${server.address().port}`);
+                });
             }, 1000);
         } else {
-            console.error('Server error:', err);
+            process.exit(1);
         }
     });
 }).catch(err => {
-    console.error('Failed to connect to MongoDB:', err);
+    console.error('Failed to start server:', err);
     process.exit(1);
 });
 
-// Handle graceful shutdown
+// Graceful shutdown
 process.on('SIGTERM', () => {
-    app.close(() => {
-        console.log('Server shutting down');
+    console.log('SIGTERM received. Shutting down gracefully...');
+    mongoose.connection.close(false, () => {
+        console.log('MongoDB connection closed.');
         process.exit(0);
     });
 });
 
 process.on('SIGINT', () => {
-    app.close(() => {
-        console.log('Server shutting down');
+    console.log('SIGINT received. Shutting down gracefully...');
+    mongoose.connection.close(false, () => {
+        console.log('MongoDB connection closed.');
         process.exit(0);
     });
 });
