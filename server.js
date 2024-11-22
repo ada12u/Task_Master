@@ -66,14 +66,71 @@ app.use((req, res, next) => {
     next();
 });
 
-// Rate limiting
-const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 100 // limit each IP to 100 requests per windowMs
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Error:', err);
+
+    // Mongoose validation error
+    if (err.name === 'ValidationError') {
+        return res.status(400).json({
+            status: 'error',
+            message: 'Validation Error',
+            details: Object.values(err.errors).map(e => e.message)
+        });
+    }
+
+    // JWT authentication error
+    if (err.name === 'JsonWebTokenError') {
+        return res.status(401).json({
+            status: 'error',
+            message: 'Invalid token',
+            details: 'Please login again'
+        });
+    }
+
+    // Rate limit error
+    if (err.status === 429) {
+        return res.status(429).json({
+            status: 'error',
+            message: 'Too many requests',
+            details: 'Please try again later'
+        });
+    }
+
+    // Default error
+    res.status(err.status || 500).json({
+        status: 'error',
+        message: err.message || 'Internal Server Error',
+        details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
 });
 
-// Apply rate limiting to all routes
-app.use(limiter);
+// Updated rate limiting configuration
+const rateLimitConfig = {
+    standard: rateLimit({
+        windowMs: 15 * 60 * 1000, // 15 minutes
+        max: 100, // limit each IP to 100 requests per windowMs
+        message: {
+            status: 'error',
+            message: 'Too many requests',
+            details: 'Please try again after 15 minutes'
+        }
+    }),
+    auth: rateLimit({
+        windowMs: 60 * 60 * 1000, // 1 hour
+        max: 5, // limit each IP to 5 failed login attempts per hour
+        message: {
+            status: 'error',
+            message: 'Too many login attempts',
+            details: 'Please try again after 1 hour'
+        }
+    })
+};
+
+// Apply rate limiting
+app.use('/api/', rateLimitConfig.standard);
+app.use('/api/users/login', rateLimitConfig.auth);
+app.use('/api/users/register', rateLimitConfig.auth);
 
 // MongoDB Connection
 console.log('Attempting to connect to MongoDB...');
@@ -126,7 +183,7 @@ app.post('/api/users/register', async (req, res) => {
             name,
             email,
             password: hashedPassword,
-            isVerified: true // Temporarily set to true for testing
+            isVerified: false // Set to false for email verification
         });
 
         // Save user to database
@@ -139,6 +196,28 @@ app.post('/api/users/register', async (req, res) => {
             process.env.JWT_SECRET,
             { expiresIn: '7d' }
         );
+
+        // Send verification email
+        const verificationToken = jwt.sign(
+            { userId: savedUser._id },
+            process.env.JWT_SECRET,
+            { expiresIn: '1d' }
+        );
+        const verificationUrl = `http://localhost:5000/api/users/verify/${verificationToken}`;
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: savedUser.email,
+            subject: 'TaskMaster - Verify Your Email',
+            html: `
+                <h1>Welcome to TaskMaster!</h1>
+                <p>Please click the link below to verify your email address:</p>
+                <a href="${verificationUrl}">${verificationUrl}</a>
+                <p>This link will expire in 24 hours.</p>
+                <p>If you didn't create this account, please ignore this email.</p>
+            `
+        };
+
+        await transporter.sendMail(mailOptions);
 
         console.log('Registration successful, sending response');
         res.status(201).json({
@@ -187,6 +266,12 @@ app.post('/api/users/login', async (req, res) => {
         if (!isValidPassword) {
             console.log('Invalid password');
             return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        // Check if email is verified
+        if (!user.isVerified) {
+            console.log('Email not verified');
+            return res.status(401).json({ error: 'Email not verified' });
         }
 
         // Create token
@@ -690,6 +775,131 @@ app.get('/api/test-email', async (req, res) => {
     } catch (error) {
         console.error('Email test error:', error);
         res.status(500).send({ error: 'Failed to send test email', details: error.message });
+    }
+});
+
+// Email verification endpoint
+app.get('/api/users/verify/:token', async (req, res) => {
+    try {
+        const token = req.params.token;
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        
+        const user = await User.findOne({ _id: decoded.userId });
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        if (user.isVerified) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Email already verified'
+            });
+        }
+
+        user.isVerified = true;
+        await user.save();
+
+        res.json({
+            status: 'success',
+            message: 'Email verified successfully'
+        });
+    } catch (error) {
+        res.status(400).json({
+            status: 'error',
+            message: 'Invalid or expired verification token'
+        });
+    }
+});
+
+// Request password reset
+app.post('/api/users/reset-password-request', async (req, res) => {
+    try {
+        const { email } = req.body;
+        const user = await User.findOne({ email });
+        
+        if (!user) {
+            return res.status(404).json({
+                status: 'error',
+                message: 'User not found'
+            });
+        }
+
+        const resetToken = jwt.sign(
+            { userId: user._id },
+            process.env.JWT_SECRET,
+            { expiresIn: '1h' }
+        );
+
+        // Store reset token and expiry
+        user.resetToken = resetToken;
+        user.resetTokenExpiry = Date.now() + 3600000; // 1 hour
+        await user.save();
+
+        // Send reset email
+        const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+        const mailOptions = {
+            from: process.env.EMAIL_USER,
+            to: user.email,
+            subject: 'Password Reset Request',
+            html: `
+                <h1>Password Reset Request</h1>
+                <p>Click the link below to reset your password. This link will expire in 1 hour.</p>
+                <a href="${resetUrl}">Reset Password</a>
+                <p>If you didn't request this, please ignore this email.</p>
+            `
+        };
+
+        await transporter.sendMail(mailOptions);
+
+        res.json({
+            status: 'success',
+            message: 'Password reset email sent'
+        });
+    } catch (error) {
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to send reset email'
+        });
+    }
+});
+
+// Reset password
+app.post('/api/users/reset-password/:token', async (req, res) => {
+    try {
+        const { token } = req.params;
+        const { password } = req.body;
+
+        const user = await User.findOne({
+            resetToken: token,
+            resetTokenExpiry: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            return res.status(400).json({
+                status: 'error',
+                message: 'Invalid or expired reset token'
+            });
+        }
+
+        // Hash new password
+        const salt = await bcrypt.genSalt(10);
+        user.password = await bcrypt.hash(password, salt);
+        user.resetToken = undefined;
+        user.resetTokenExpiry = undefined;
+        await user.save();
+
+        res.json({
+            status: 'success',
+            message: 'Password reset successful'
+        });
+    } catch (error) {
+        res.status(500).json({
+            status: 'error',
+            message: 'Failed to reset password'
+        });
     }
 });
 

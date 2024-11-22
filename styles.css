@@ -97,6 +97,49 @@ body {
     font-size: 1rem;
 }
 
+/* Password Reset Styles */
+.forgot-password-link {
+    display: block;
+    text-align: center;
+    margin-top: 1rem;
+    color: var(--primary-color);
+    text-decoration: none;
+    font-size: 0.9rem;
+}
+
+.forgot-password-link:hover {
+    text-decoration: underline;
+}
+
+.auth-form h3 {
+    text-align: center;
+    margin-bottom: 1rem;
+    color: var(--text-color);
+}
+
+.auth-form p {
+    text-align: center;
+    margin-bottom: 1.5rem;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.btn-secondary {
+    background-color: var(--border-color);
+    color: var(--text-color);
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1rem;
+    margin-top: 0.5rem;
+    transition: background-color 0.2s;
+}
+
+.btn-secondary:hover {
+    background-color: #e0e0e0;
+}
+
 /* Main App Section Styles */
 .app-section {
     flex: 1;
@@ -532,33 +575,6 @@ body {
 
 .btn-primary:hover {
     background-color: #357ABD;
-}
-
-.btn-secondary {
-    background-color: var(--gray-light);
-    color: var(--gray);
-    border: 1px solid var(--border-color);
-    padding: 0.75rem 1.5rem;
-    border-radius: 5px;
-    cursor: pointer;
-    font-size: 1rem;
-}
-
-.btn-secondary:hover {
-    background-color: #e9ecef;
-}
-
-.category-input,
-.tags-input,
-.categories-container,
-.tags-container,
-.category-badge,
-.tag-badge {
-    display: none;
-}
-
-.task-tags {
-    display: none;
 }
 
 /* Loader Styles */

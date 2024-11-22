@@ -455,6 +455,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         // No token found, show login
         showAuth();
     }
+
+    // Add forgot password link
+    const loginForm = document.querySelector('#login-form');
+    const forgotPasswordLink = document.createElement('a');
+    forgotPasswordLink.href = '#';
+    forgotPasswordLink.textContent = 'Forgot Password?';
+    forgotPasswordLink.classList.add('forgot-password-link');
+    forgotPasswordLink.onclick = () => showPasswordResetForm();
+    loginForm.appendChild(forgotPasswordLink);
+
+    // Password reset form listeners
+    document.querySelector('#password-reset-form').addEventListener('submit', handlePasswordResetRequest);
+    document.querySelector('#password-reset-token-form').addEventListener('submit', handlePasswordReset);
 });
 
 // Logout function
@@ -478,6 +491,71 @@ function debounce(func, wait) {
         clearTimeout(timeout);
         timeout = setTimeout(later, wait);
     };
+}
+
+// Password Reset Functions
+async function requestPasswordReset(email) {
+    try {
+        showLoader('Sending reset email...');
+        const response = await api.request('/api/users/reset-password-request', {
+            method: 'POST',
+            body: JSON.stringify({ email })
+        });
+        hideLoader();
+        showSuccess('Password reset email sent. Please check your inbox.');
+        showLoginForm();
+    } catch (error) {
+        hideLoader();
+        showError(error.message);
+    }
+}
+
+async function resetPassword(token, password) {
+    try {
+        showLoader('Resetting password...');
+        const response = await api.request(`/api/users/reset-password/${token}`, {
+            method: 'POST',
+            body: JSON.stringify({ password })
+        });
+        hideLoader();
+        showSuccess('Password reset successful. Please login with your new password.');
+        showLoginForm();
+    } catch (error) {
+        hideLoader();
+        showError(error.message);
+    }
+}
+
+// Show password reset form
+function showPasswordResetForm() {
+    const authForms = document.querySelectorAll('.auth-form');
+    authForms.forEach(form => form.classList.add('hidden'));
+    
+    const resetForm = document.getElementById('password-reset-form');
+    resetForm.classList.remove('hidden');
+}
+
+// Handle password reset request
+async function handlePasswordResetRequest(event) {
+    event.preventDefault();
+    const email = event.target.email.value;
+    await requestPasswordReset(email);
+}
+
+// Handle password reset
+async function handlePasswordReset(event) {
+    event.preventDefault();
+    const urlParams = new URLSearchParams(window.location.search);
+    const token = urlParams.get('token');
+    const password = event.target.password.value;
+    const confirmPassword = event.target.confirmPassword.value;
+
+    if (password !== confirmPassword) {
+        showError('Passwords do not match');
+        return;
+    }
+
+    await resetPassword(token, password);
 }
 
 // DOM Elements
