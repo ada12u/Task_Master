@@ -46,6 +46,7 @@ const allowedOrigins = [
     'https://task-masters.onrender.com',
     'https://task-master-frontend.onrender.com',
     'https://task-master-api.onrender.com',
+    'https://task-master-u3ss.onrender.com',
     'https://task-master-350012.web.app'
 ];
 
@@ -77,13 +78,25 @@ app.use((req, res, next) => {
     next();
 });
 
-// Serve static files in production
-if (process.env.NODE_ENV === 'production') {
-    app.use(express.static(path.join(__dirname, 'public')));
-}
+// Serve static files with proper MIME types
+app.use(express.static(path.join(__dirname), {
+    setHeaders: (res, filePath) => {
+        // Set correct MIME types for different file extensions
+        if (filePath.endsWith('.js')) {
+            res.setHeader('Content-Type', 'application/javascript');
+        } else if (filePath.endsWith('.css')) {
+            res.setHeader('Content-Type', 'text/css');
+        } else if (filePath.endsWith('.html')) {
+            res.setHeader('Content-Type', 'text/html');
+        }
+    }
+}));
 
-// Serve index.html for the root route
-app.get('/', (req, res) => {
+// Serve index.html for all routes except /api
+app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) {
+        return next();
+    }
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
