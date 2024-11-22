@@ -34,7 +34,7 @@ const api = {
                 headers,
                 credentials: 'include',
                 mode: 'cors',
-                ...(options.body && { body: JSON.stringify(options.body) })
+                ...(options.body && { body: typeof options.body === 'string' ? options.body : JSON.stringify(options.body) })
             };
             
             console.log('Request options:', requestOptions);
@@ -50,14 +50,14 @@ const api = {
             const data = await response.json();
             
             if (!response.ok) {
-                throw new Error(data.message || 'Server error');
+                throw new Error(data.message || `Server error: ${response.status}`);
             }
 
             return data;
         } catch (error) {
             console.error('API request error:', error);
             
-            if (retries > 0) {
+            if (retries > 0 && error.message.includes('Failed to fetch')) {
                 console.log(`Network error, retrying... (${retries} attempts left)`);
                 const backoffTime = Math.min(1000 * (2 ** (3 - retries)), 5000);
                 await new Promise(resolve => setTimeout(resolve, backoffTime));
@@ -72,66 +72,54 @@ const api = {
         try {
             const response = await this.request('/api/users/login', {
                 method: 'POST',
-                body: JSON.stringify({ email, password })
+                body: { email, password }
             });
 
             if (response.token) {
                 localStorage.setItem('authToken', response.token);
                 localStorage.setItem('USER_STORAGE_KEY', JSON.stringify(response.user));
-                return response;
-            } else {
-                throw new Error('Invalid response from server: No token received');
+                authToken = response.token;
+                currentUser = response.user;
             }
+
+            return response;
         } catch (error) {
             console.error('Login failed:', error);
-            
-            if (error.message.includes('Network error')) {
-                showError('Unable to connect to the server. Please check your internet connection.');
-            } else if (error.message.includes('Invalid credentials')) {
-                showError('Invalid email or password. Please try again.');
-            } else if (error.message.includes('Invalid response')) {
-                showError('Server error: Invalid response received. Please try again later.');
-            } else {
-                showError('Login failed. Please try again.');
-            }
-            
             throw error;
         }
-    }
-};
+    },
 
-// Password reset functions
-async function requestPasswordReset(email) {
-    try {
-        showLoader('Requesting password reset...');
-        const response = await api.request('/api/users/forgot-password', {
-            method: 'POST',
-            body: JSON.stringify({ email })
-        });
-        hideLoader();
-        showSuccess('Password reset instructions have been sent to your email.');
-        showLoginForm();
-    } catch (error) {
-        hideLoader();
-        showError(error.message);
+    async requestPasswordReset(email) {
+        try {
+            showLoader('Requesting password reset...');
+            const response = await this.request('/api/users/forgot-password', {
+                method: 'POST',
+                body: JSON.stringify({ email })
+            });
+            hideLoader();
+            showSuccess('Password reset instructions have been sent to your email.');
+            showLoginForm();
+        } catch (error) {
+            hideLoader();
+            showError(error.message);
+        }
     }
-}
 
-async function resetPassword(token, password) {
-    try {
-        showLoader('Resetting password...');
-        const response = await api.request('/api/users/reset-password', {
-            method: 'POST',
-            body: JSON.stringify({ token, password })
-        });
-        hideLoader();
-        showSuccess('Password reset successful. Please login with your new password.');
-        showLoginForm();
-    } catch (error) {
-        hideLoader();
-        showError(error.message);
+    async resetPassword(token, password) {
+        try {
+            showLoader('Resetting password...');
+            const response = await this.request('/api/users/reset-password', {
+                method: 'POST',
+                body: JSON.stringify({ token, password })
+            });
+            hideLoader();
+            showSuccess('Password reset successful. Please login with your new password.');
+            showLoginForm();
+        } catch (error) {
+            hideLoader();
+            showError(error.message);
+        }
     }
-}
 
 // Show password reset form
 function showPasswordResetForm() {
