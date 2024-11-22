@@ -15,6 +15,25 @@ const Task = require('./models/Task');
 const app = express();
 const PORT = process.env.PORT || 8080;
 
+// Rate limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100 // limit each IP to 100 requests per windowMs
+});
+app.use(limiter);
+
+// Body parser middleware
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Security headers
+app.use((req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    next();
+});
+
 // CORS configuration
 const allowedOrigins = [
     'http://localhost:3000',
@@ -30,15 +49,11 @@ const allowedOrigins = [
 
 app.use(cors({
     origin: function(origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true);
-        
-        if (allowedOrigins.indexOf(origin) === -1) {
-            console.log('Blocked by CORS:', origin);
-            return callback(null, false);
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
         }
-        console.log('Allowed by CORS:', origin);
-        return callback(null, true);
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
@@ -47,12 +62,10 @@ app.use(cors({
     optionsSuccessStatus: 204
 }));
 
-// Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Serve static files
-app.use(express.static(path.join(__dirname)));
+// Serve static files in production
+if (process.env.NODE_ENV === 'production') {
+    app.use(express.static(path.join(__dirname, 'public')));
+}
 
 // Serve index.html for the root route
 app.get('/', (req, res) => {
@@ -162,8 +175,17 @@ const auth = async (req, res, next) => {
 app.post('/api/users/login', async (req, res) => {
     try {
         console.log('\n=== Login Attempt ===');
+        console.log('Headers:', req.headers);
+        console.log('Raw body:', req.body);
+        
         const { email, password } = req.body;
-        console.log('Request body:', { email, password });
+        
+        if (!email || !password) {
+            console.log('Missing credentials');
+            return res.status(400).json({ error: 'Email and password are required' });
+        }
+        
+        console.log('Login attempt for email:', email);
 
         // Find user
         const user = await User.findOne({ email });
@@ -188,22 +210,22 @@ app.post('/api/users/login', async (req, res) => {
             { expiresIn: '24h' }
         );
 
-        console.log('\n--- Outgoing Response ---');
-        console.log('Status: 200');
-        console.log('Response Body:', { token: '***', user: { ...user.toObject(), password: undefined } });
-
-        res.json({
+        const response = {
             token,
             user: {
                 id: user._id,
                 name: user.name,
                 email: user.email
             }
-        });
+        };
 
+        console.log('Login successful');
+        console.log('Response:', { ...response, token: '***' });
+
+        res.json(response);
     } catch (error) {
         console.error('Login error:', error);
-        res.status(500).json({ error: 'Error logging in' });
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -820,36 +842,49 @@ app.patch('/api/tasks/:id/toggle', auth, async (req, res) => {
 });
 
 // MongoDB Connection
-console.log('Attempting to connect to MongoDB...');
-mongoose.connect(process.env.MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true
-})
-.then(() => {
-    console.log('Successfully connected to MongoDB');
-    // Test database connection by counting users
-    User.countDocuments()
-        .then(count => console.log('Number of users in database:', count))
-        .catch(err => console.error('Error counting users:', err));
-})
-.catch(err => {
-    console.error('MongoDB connection error:', err);
-    process.exit(1); // Exit if we can't connect to database
-});
-
-// Start server
-const server = app.listen(PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
-}).on('error', (err) => {
-    if (err.code === 'EADDRINUSE') {
-        console.log(`Port ${PORT} is in use. Trying port 3000...`);
-        server.close();
-        app.listen(3000, () => {
-            console.log('Server is running on port 3000');
+const connectDB = async (retries = 5) => {
+    try {
+        const conn = await mongoose.connect(process.env.MONGODB_URI, {
+            useNewUrlParser: true,
+            useUnifiedTopology: true,
+            serverSelectionTimeoutMS: 5000,
         });
-    } else {
-        console.error('Server error:', err);
+        console.log(`MongoDB Connected: ${conn.connection.host}`);
+        
+        // Test database connection
+        await User.countDocuments();
+        console.log('Database connection test successful');
+        
+        return conn;
+    } catch (error) {
+        console.error('MongoDB connection error:', error);
+        if (retries > 0) {
+            console.log(`Retrying connection... (${retries} attempts left)`);
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            return connectDB(retries - 1);
+        }
+        process.exit(1);
     }
+};
+
+// Connect to MongoDB before starting the server
+connectDB().then(() => {
+    const server = app.listen(PORT, () => {
+        console.log(`Server is running on port ${PORT}`);
+    }).on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            console.log(`Port ${PORT} is in use, trying another port...`);
+            setTimeout(() => {
+                server.close();
+                app.listen(0);
+            }, 1000);
+        } else {
+            console.error('Server error:', err);
+        }
+    });
+}).catch(err => {
+    console.error('Failed to connect to MongoDB:', err);
+    process.exit(1);
 });
 
 // Handle graceful shutdown

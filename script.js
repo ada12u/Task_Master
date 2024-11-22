@@ -10,7 +10,7 @@ let tasks = [];
 
 // API Service
 const api = {
-    async request(endpoint, options = {}) {
+    async request(endpoint, options = {}, retries = 3) {
         try {
             const headers = {
                 'Content-Type': 'application/json',
@@ -35,20 +35,35 @@ const api = {
 
             const url = `${API_BASE_URL}${endpoint}`;
             console.log('Making request to:', url);
-            console.log('Request options:', {
+            
+            const requestOptions = {
                 method: options.method || 'GET',
                 headers,
-                body: options.body
-            });
+                ...(options.body && { body: options.body })
+            };
+            
+            console.log('Request options:', requestOptions);
 
-            const response = await fetch(url, {
-                method: options.method || 'GET',
-                headers,
-                body: options.body
-            });
+            let response;
+            try {
+                response = await fetch(url, requestOptions);
+            } catch (networkError) {
+                if (retries > 0) {
+                    console.log(`Network error, retrying... (${retries} attempts left)`);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    return this.request(endpoint, options, retries - 1);
+                }
+                throw new Error('Network error: Unable to connect to the server');
+            }
 
             console.log('Response status:', response.status);
             console.log('Response headers:', Object.fromEntries(response.headers.entries()));
+
+            if (response.status === 503 && retries > 0) {
+                console.log(`Service unavailable, retrying... (${retries} attempts left)`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                return this.request(endpoint, options, retries - 1);
+            }
 
             const text = await response.text();
             console.log('Raw response text:', text);
@@ -63,12 +78,21 @@ const api = {
             }
 
             if (!response.ok) {
-                throw new Error(data?.error || `Request failed with status ${response.status}`);
+                const error = new Error(data?.error || `Request failed with status ${response.status}`);
+                error.status = response.status;
+                error.data = data;
+                throw error;
             }
 
             return data;
         } catch (error) {
             console.error('API request error:', error);
+            if (error.status === 401) {
+                // Handle unauthorized access
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('USER_STORAGE_KEY');
+                window.location.reload();
+            }
             throw error;
         }
     },

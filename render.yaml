@@ -15,7 +15,9 @@ services:
         sync: false
       - key: EMAIL_PASS
         sync: false
-    healthCheckPath: /
+      - key: FRONTEND_URL
+        value: https://task-master.onrender.com
+    healthCheckPath: /health
     autoDeploy: true
     disk:
       name: task-master-data
