@@ -49,20 +49,25 @@ const allowedOrigins = [
     'https://task-master-350012.web.app'
 ];
 
-app.use((req, res, next) => {
-    const origin = req.headers.origin;
-    if (allowedOrigins.includes(origin)) {
-        res.setHeader('Access-Control-Allow-Origin', origin);
-    }
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept');
-    res.setHeader('Access-Control-Allow-Credentials', 'true');
-    
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(204);
-    }
-    next();
-});
+// CORS middleware
+app.use(cors({
+    origin: function(origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            console.log('Blocked origin:', origin);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+    preflightContinue: false,
+    optionsSuccessStatus: 204
+}));
 
 // Additional security headers
 app.use((req, res, next) => {
@@ -185,32 +190,37 @@ const auth = async (req, res, next) => {
 app.post('/api/users/login', async (req, res) => {
     try {
         console.log('\n=== Login Attempt ===');
-        console.log('Headers:', req.headers);
-        console.log('Raw body:', req.body);
+        console.log('Request Origin:', req.headers.origin);
+        console.log('Request Headers:', req.headers);
         
         const { email, password } = req.body;
         
         if (!email || !password) {
             console.log('Missing credentials');
-            return res.status(400).json({ error: 'Email and password are required' });
+            return res.status(400).json({ 
+                success: false, 
+                message: 'Email and password are required' 
+            });
         }
-        
-        console.log('Login attempt for email:', email);
 
         // Find user
         const user = await User.findOne({ email });
-        console.log('User found:', user ? 'Yes' : 'No');
-
         if (!user) {
-            return res.status(401).json({ error: 'Invalid email or password' });
+            console.log('User not found:', email);
+            return res.status(401).json({ 
+                success: false, 
+                message: 'Invalid credentials' 
+            });
         }
 
         // Check password
         const isMatch = await bcrypt.compare(password, user.password);
-        console.log('Password match:', isMatch ? 'Yes' : 'No');
-
         if (!isMatch) {
-            return res.status(401).json({ error: 'Invalid email or password' });
+            console.log('Invalid password for user:', email);
+            return res.status(401).json({ 
+                success: false, 
+                message: 'Invalid credentials' 
+            });
         }
 
         // Generate token
@@ -220,22 +230,23 @@ app.post('/api/users/login', async (req, res) => {
             { expiresIn: '24h' }
         );
 
-        const response = {
+        console.log('Login successful for user:', email);
+        
+        res.status(200).json({
+            success: true,
             token,
             user: {
-                id: user._id,
-                name: user.name,
-                email: user.email
+                _id: user._id,
+                email: user.email,
+                name: user.name
             }
-        };
-
-        console.log('Login successful');
-        console.log('Response:', { ...response, token: '***' });
-
-        res.json(response);
+        });
     } catch (error) {
         console.error('Login error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ 
+            success: false, 
+            message: 'Server error during login' 
+        });
     }
 });
 

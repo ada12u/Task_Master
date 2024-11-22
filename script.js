@@ -14,18 +14,12 @@ const api = {
         try {
             const headers = {
                 'Content-Type': 'application/json',
-                'Accept': 'application/json'
+                'Accept': 'application/json',
+                'Origin': window.location.origin
             };
 
-            // Only add Authorization header if we have a token and it's not an auth endpoint
-            const noAuthEndpoints = [
-                '/api/users/login',
-                '/api/users/register',
-                '/api/users/forgot-password',
-                '/api/users/reset-password'
-            ];
-            
-            if (!noAuthEndpoints.some(path => endpoint.includes(path))) {
+            // Add auth header if needed
+            if (!endpoint.includes('/api/users/login') && !endpoint.includes('/api/users/register')) {
                 const token = getToken();
                 if (!token) {
                     throw new Error('No authentication token found');
@@ -39,6 +33,8 @@ const api = {
             const requestOptions = {
                 method: options.method || 'GET',
                 headers,
+                credentials: 'include',
+                mode: 'cors',
                 ...(options.body && { body: options.body })
             };
             
