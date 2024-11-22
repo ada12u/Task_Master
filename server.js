@@ -63,14 +63,20 @@ const allowedOrigins = [
     'https://task-master-350012.web.app'
 ];
 
-// CORS middleware
+// CORS middleware with detailed logging
 app.use(cors({
     origin: function(origin, callback) {
+        console.log('Request Origin:', origin);
+        
         // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin) return callback(null, true);
+        if (!origin) {
+            console.log('Allowing request with no origin');
+            return callback(null, true);
+        }
         
         if (allowedOrigins.indexOf(origin) !== -1) {
-            callback(null, true);
+            console.log('Allowed origin:', origin);
+            callback(null, origin);
         } else {
             console.log('Blocked origin:', origin);
             callback(new Error('Not allowed by CORS'));
@@ -79,6 +85,7 @@ app.use(cors({
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
+    exposedHeaders: ['Set-Cookie'],
     preflightContinue: false,
     optionsSuccessStatus: 204
 }));
