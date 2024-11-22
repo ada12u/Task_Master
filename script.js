@@ -1,3 +1,18 @@
+// Modal Functions
+window.hideAddTaskModal = function() {
+    const modal = document.getElementById('add-task-modal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
+};
+
+window.showAddTaskModal = function() {
+    const modal = document.getElementById('add-task-modal');
+    if (modal) {
+        modal.style.display = 'block';
+    }
+};
+
 // API Configuration
 const API_BASE_URL = window.location.hostname === 'localhost' 
     ? 'http://localhost:8080'
@@ -567,13 +582,6 @@ window.hideAddTaskModal = function() {
         // Reset form
         const form = modal.querySelector('form');
         if (form) form.reset();
-    }
-};
-
-window.showAddTaskModal = function() {
-    const modal = document.getElementById('add-task-modal');
-    if (modal) {
-        modal.style.display = 'block';
     }
 };
 

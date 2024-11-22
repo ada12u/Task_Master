@@ -54,7 +54,7 @@
                         <li><i class="fas fa-calendar-week"></i> Upcoming</li>
                     </ul>
                 </nav>
-                <button class="btn-logout" onclick="logout()">
+                <button class="btn-logout" onclick="window.logout()">
                     <i class="fas fa-sign-out-alt"></i> Logout
                 </button>
             </div>
@@ -64,10 +64,10 @@
                 <div class="app-header">
                     <h1>TaskMaster</h1>
                     <div class="header-actions">
-                        <button class="btn-logout" onclick="logout()">
+                        <button class="btn-logout" onclick="window.logout()">
                             <i class="fas fa-sign-out-alt"></i> Logout
                         </button>
-                        <button class="add-task-btn" onclick="showAddTaskModal()">
+                        <button class="add-task-btn" onclick="window.showAddTaskModal()">
                             <i class="fas fa-plus"></i>
                             Add Task
                         </button>
@@ -148,10 +148,10 @@
                 <div class="task-header">
                     <h3 class="task-title"></h3>
                     <div class="task-actions">
-                        <button class="complete-btn" onclick="toggleTaskComplete(this.closest('.task-card').dataset.taskId)">
+                        <button class="complete-btn" onclick="window.toggleTaskComplete(this.closest('.task-card').dataset.taskId)">
                             <i class="fas fa-check"></i>
                         </button>
-                        <button class="delete-btn" onclick="deleteTask(this.closest('.task-card').dataset.taskId)">
+                        <button class="delete-btn" onclick="window.deleteTask(this.closest('.task-card').dataset.taskId)">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
