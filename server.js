@@ -26,6 +26,19 @@ app.use(limiter);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Serve static files with proper MIME types
+app.use(express.static(__dirname, {
+    setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.js')) {
+            res.set('Content-Type', 'application/javascript');
+        } else if (filePath.endsWith('.css')) {
+            res.set('Content-Type', 'text/css');
+        } else if (filePath.endsWith('.html')) {
+            res.set('Content-Type', 'text/html');
+        }
+    }
+}));
+
 // Security headers
 app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -77,20 +90,6 @@ app.use((req, res, next) => {
     res.setHeader('X-XSS-Protection', '1; mode=block');
     next();
 });
-
-// Serve static files with proper MIME types
-app.use(express.static(path.join(__dirname), {
-    setHeaders: (res, filePath) => {
-        // Set correct MIME types for different file extensions
-        if (filePath.endsWith('.js')) {
-            res.setHeader('Content-Type', 'application/javascript');
-        } else if (filePath.endsWith('.css')) {
-            res.setHeader('Content-Type', 'text/css');
-        } else if (filePath.endsWith('.html')) {
-            res.setHeader('Content-Type', 'text/html');
-        }
-    }
-}));
 
 // Serve index.html for all routes except /api
 app.get('*', (req, res, next) => {
