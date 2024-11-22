@@ -43,15 +43,23 @@ const allowedOrigins = [
     'http://localhost:8080',
     'http://127.0.0.1:8080',
     'https://task-master.onrender.com',
+    'https://task-masters.onrender.com',
     'https://task-master-frontend.onrender.com',
-    'https://task-master-api.onrender.com'
+    'https://task-master-api.onrender.com',
+    'https://task-master-350012.web.app'
 ];
 
 app.use(cors({
     origin: function(origin, callback) {
-        if (!origin || allowedOrigins.includes(origin)) {
+        // For development or testing purposes
+        if (!origin) {
+            return callback(null, true);
+        }
+
+        if (allowedOrigins.includes(origin)) {
             callback(null, true);
         } else {
+            console.log('Blocked by CORS:', origin);
             callback(new Error('Not allowed by CORS'));
         }
     },
