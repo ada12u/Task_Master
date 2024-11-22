@@ -2,7 +2,7 @@ services:
   - type: web
     name: task-master
     env: node
-    buildCommand: npm install && npm run build
+    buildCommand: npm install
     startCommand: node server.js
     envVars:
       - key: NODE_ENV
@@ -15,7 +15,7 @@ services:
         sync: false
       - key: EMAIL_PASS
         sync: false
-    healthCheckPath: /api/health
+    healthCheckPath: /
     autoDeploy: true
     disk:
       name: task-master-data

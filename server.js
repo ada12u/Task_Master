@@ -21,8 +21,11 @@ const allowedOrigins = [
     'http://localhost:5000',
     'http://127.0.0.1:3000',
     'http://127.0.0.1:5000',
-    'https://task-masters.onrender.com',
-    'https://task-master.onrender.com'
+    'http://localhost:8080',
+    'http://127.0.0.1:8080',
+    'https://task-master.onrender.com',
+    'https://task-master-frontend.onrender.com',
+    'https://task-master-api.onrender.com'
 ];
 
 app.use(cors({
@@ -31,77 +34,76 @@ app.use(cors({
         if (!origin) return callback(null, true);
         
         if (allowedOrigins.indexOf(origin) === -1) {
-            const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-            return callback(new Error(msg), false);
+            console.log('Blocked by CORS:', origin);
+            return callback(null, false);
         }
+        console.log('Allowed by CORS:', origin);
         return callback(null, true);
     },
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    credentials: true
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    credentials: true,
+    preflightContinue: false,
+    optionsSuccessStatus: 204
 }));
 
 // Middleware
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Serve static files
+app.use(express.static(path.join(__dirname)));
+
+// Serve index.html for the root route
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'ok', message: 'Server is running' });
+});
+
+// Add content-type middleware for API routes
+app.use('/api', (req, res, next) => {
+    res.header('Content-Type', 'application/json');
+    next();
+});
 
 // Logging middleware
 app.use((req, res, next) => {
-    // Log request
-    console.log('\n--- Incoming Request ---');
-    console.log('Time:', new Date().toISOString());
-    console.log('Method:', req.method);
-    console.log('Path:', req.path);
-    console.log('Headers:', req.headers);
-    console.log('Body:', req.body);
-
-    // Capture the original send
-    const originalSend = res.send;
-    res.send = function(data) {
-        console.log('\n--- Outgoing Response ---');
-        console.log('Status:', res.statusCode);
-        console.log('Response Body:', data);
-        return originalSend.call(this, data);
-    };
-
+    console.log(`${req.method} ${req.path}`);
     next();
 });
 
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error('Error:', err);
-
-    // Mongoose validation error
+    
     if (err.name === 'ValidationError') {
         return res.status(400).json({
-            status: 'error',
-            message: 'Validation Error',
+            error: 'Validation Error',
             details: Object.values(err.errors).map(e => e.message)
         });
     }
-
-    // JWT authentication error
+    
+    if (err.name === 'MongoError' && err.code === 11000) {
+        return res.status(400).json({
+            error: 'Duplicate Error',
+            message: 'This email is already registered'
+        });
+    }
+    
     if (err.name === 'JsonWebTokenError') {
         return res.status(401).json({
-            status: 'error',
-            message: 'Invalid token',
-            details: 'Please login again'
+            error: 'Authentication Error',
+            message: 'Invalid token'
         });
     }
-
-    // Rate limit error
-    if (err.status === 429) {
-        return res.status(429).json({
-            status: 'error',
-            message: 'Too many requests',
-            details: 'Please try again later'
-        });
-    }
-
-    // Default error
-    res.status(err.status || 500).json({
-        status: 'error',
-        message: err.message || 'Internal Server Error',
-        details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    
+    res.status(500).json({
+        error: 'Server Error',
+        message: process.env.NODE_ENV === 'development' ? err.message : 'An unexpected error occurred'
     });
 });
 
@@ -132,27 +134,43 @@ app.use('/api/', rateLimitConfig.standard);
 app.use('/api/users/login', rateLimitConfig.auth);
 app.use('/api/users/register', rateLimitConfig.auth);
 
+// Authentication Middleware
+const auth = async (req, res, next) => {
+    try {
+        const token = req.header('Authorization')?.replace('Bearer ', '');
+        
+        if (!token) {
+            throw new Error('No authentication token found');
+        }
+
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const user = await User.findOne({ _id: decoded.userId });
+
+        if (!user) {
+            throw new Error('User not found');
+        }
+
+        req.token = token;
+        req.user = user;
+        next();
+    } catch (error) {
+        res.status(401).send({ error: 'Please authenticate.' });
+    }
+};
+
 // User Login
 app.post('/api/users/login', async (req, res) => {
     try {
         console.log('\n=== Login Attempt ===');
-        console.log('Request body:', req.body);
-
         const { email, password } = req.body;
+        console.log('Request body:', { email, password });
 
-        // Validate required fields
-        if (!email || !password) {
-            console.log('Missing required fields');
-            return res.status(400).json({ error: 'Email and password are required' });
-        }
-
-        // Find user by email
+        // Find user
         const user = await User.findOne({ email });
         console.log('User found:', user ? 'Yes' : 'No');
 
         if (!user) {
-            console.log('User not found');
-            return res.status(401).json({ error: 'Invalid credentials' });
+            return res.status(401).json({ error: 'Invalid email or password' });
         }
 
         // Check password
@@ -160,25 +178,20 @@ app.post('/api/users/login', async (req, res) => {
         console.log('Password match:', isMatch ? 'Yes' : 'No');
 
         if (!isMatch) {
-            console.log('Invalid password');
-            return res.status(401).json({ error: 'Invalid credentials' });
+            return res.status(401).json({ error: 'Invalid email or password' });
         }
 
-        // Check if user is verified
-        if (!user.isVerified) {
-            console.log('User not verified');
-            return res.status(401).json({ error: 'Please verify your email before logging in' });
-        }
-
-        // Create and sign JWT token
+        // Generate token
         const token = jwt.sign(
             { userId: user._id },
             process.env.JWT_SECRET,
-            { expiresIn: '7d' }
+            { expiresIn: '24h' }
         );
-        console.log('JWT token created');
 
-        // Send response
+        console.log('\n--- Outgoing Response ---');
+        console.log('Status: 200');
+        console.log('Response Body:', { token: '***', user: { ...user.toObject(), password: undefined } });
+
         res.json({
             token,
             user: {
@@ -187,11 +200,10 @@ app.post('/api/users/login', async (req, res) => {
                 email: user.email
             }
         });
-        console.log('Login successful');
 
     } catch (error) {
         console.error('Login error:', error);
-        res.status(500).json({ error: 'Server error during login' });
+        res.status(500).json({ error: 'Error logging in' });
     }
 });
 
@@ -211,60 +223,42 @@ app.post('/api/users/register', async (req, res) => {
 
         // Check if user already exists
         const existingUser = await User.findOne({ email });
-        console.log('User found:', existingUser ? 'Yes' : 'No');
+        console.log('User exists:', existingUser ? 'Yes' : 'No');
 
         if (existingUser) {
             console.log('User already exists');
             return res.status(400).json({ error: 'Email already registered' });
         }
 
-        // Hash password
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(password, salt);
-        console.log('Password hashed successfully');
-
         // Create new user
         const user = new User({
             name,
             email,
-            password: hashedPassword,
-            isVerified: false // Set to false for email verification
+            password // Password will be hashed by the User model pre-save middleware
         });
 
         // Save user to database
         const savedUser = await user.save();
         console.log('User saved successfully:', savedUser._id);
 
-        // Create JWT token
+        // Generate JWT token
         const token = jwt.sign(
             { userId: savedUser._id },
             process.env.JWT_SECRET,
-            { expiresIn: '7d' }
+            { expiresIn: '24h' }
         );
 
-        // Send verification email
-        const verificationToken = jwt.sign(
-            { userId: savedUser._id },
-            process.env.JWT_SECRET,
-            { expiresIn: '1d' }
-        );
-        const verificationUrl = `http://localhost:5000/api/users/verify/${verificationToken}`;
-        const mailOptions = {
-            from: process.env.EMAIL_USER,
-            to: savedUser.email,
-            subject: 'TaskMaster - Verify Your Email',
-            html: `
-                <h1>Welcome to TaskMaster!</h1>
-                <p>Please click the link below to verify your email address:</p>
-                <a href="${verificationUrl}">${verificationUrl}</a>
-                <p>This link will expire in 24 hours.</p>
-                <p>If you didn't create this account, please ignore this email.</p>
-            `
-        };
+        console.log('\n--- Registration Response ---');
+        console.log('Status: 201');
+        console.log('Response:', { 
+            message: 'Registration successful',
+            user: {
+                id: savedUser._id,
+                name: savedUser.name,
+                email: savedUser.email
+            }
+        });
 
-        await transporter.sendMail(mailOptions);
-
-        console.log('Registration successful, sending response');
         res.status(201).json({
             message: 'Registration successful',
             user: {
@@ -278,6 +272,86 @@ app.post('/api/users/register', async (req, res) => {
     } catch (error) {
         console.error('Registration error:', error);
         res.status(500).json({ error: 'Registration failed: ' + error.message });
+    }
+});
+
+// Password Reset Routes
+app.post('/api/users/forgot-password', async (req, res) => {
+    try {
+        const { email } = req.body;
+        console.log('Password reset requested for:', email);
+
+        // Find user
+        const user = await User.findOne({ email });
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        // Generate reset token
+        const resetToken = jwt.sign(
+            { userId: user._id },
+            process.env.JWT_SECRET,
+            { expiresIn: '1h' }
+        );
+
+        // Save reset token to user
+        user.resetToken = resetToken;
+        user.resetTokenExpiry = Date.now() + 3600000; // 1 hour
+        await user.save();
+
+        // In a real application, you would send an email here
+        console.log('Reset token generated:', resetToken);
+        
+        res.json({ 
+            message: 'Password reset instructions sent to email',
+            // Only in development - remove in production
+            resetToken: resetToken 
+        });
+    } catch (error) {
+        console.error('Password reset request error:', error);
+        res.status(500).json({ 
+            error: 'Failed to process password reset request',
+            details: error.message 
+        });
+    }
+});
+
+app.post('/api/users/reset-password', async (req, res) => {
+    try {
+        const { token, password } = req.body;
+        console.log('Password reset attempt with token');
+
+        // Verify token
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        
+        // Find user
+        const user = await User.findOne({ 
+            _id: decoded.userId,
+            resetToken: token,
+            resetTokenExpiry: { $gt: Date.now() }
+        });
+
+        if (!user) {
+            return res.status(400).json({ error: 'Invalid or expired reset token' });
+        }
+
+        // Hash new password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        // Update user password and clear reset token
+        user.password = hashedPassword;
+        user.resetToken = undefined;
+        user.resetTokenExpiry = undefined;
+        await user.save();
+
+        res.json({ message: 'Password reset successful' });
+    } catch (error) {
+        console.error('Password reset error:', error);
+        res.status(500).json({ 
+            error: 'Failed to reset password',
+            details: error.message 
+        });
     }
 });
 
@@ -319,45 +393,6 @@ const validatePassword = (password) => {
     return null;
 };
 
-// Email verification function
-const sendVerificationEmail = async (user, token) => {
-    const verificationUrl = `http://localhost:5000/api/users/verify/${token}`;
-    
-    const mailOptions = {
-        from: process.env.EMAIL_USER,
-        to: user.email,
-        subject: 'TaskMaster - Verify Your Email',
-        html: `
-            <h1>Welcome to TaskMaster!</h1>
-            <p>Please click the link below to verify your email address:</p>
-            <a href="${verificationUrl}">${verificationUrl}</a>
-            <p>This link will expire in 24 hours.</p>
-            <p>If you didn't create this account, please ignore this email.</p>
-        `
-    };
-
-    await transporter.sendMail(mailOptions);
-};
-
-// Authentication Middleware
-const auth = async (req, res, next) => {
-    try {
-        const token = req.header('Authorization').replace('Bearer ', '');
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        const user = await User.findById(decoded.userId);
-        
-        if (!user) {
-            throw new Error();
-        }
-
-        req.token = token;
-        req.user = user;
-        next();
-    } catch (error) {
-        res.status(401).send({ error: 'Please authenticate.' });
-    }
-};
-
 // Task Routes with RESTful principles
 // GET /api/tasks - Get all tasks for a user
 app.get('/api/tasks', auth, async (req, res) => {
@@ -376,6 +411,57 @@ app.get('/api/tasks', auth, async (req, res) => {
     }
 });
 
+// Task filtering route - MUST come before /:id route
+app.get('/api/tasks/search', auth, async (req, res) => {
+    try {
+        console.log('\n=== Filtering Tasks ===');
+        console.log('Filter criteria:', req.query);
+        console.log('User:', req.user);
+
+        const { priority, completed, startDate, endDate, query } = req.query;
+        const searchCriteria = { userId: req.user._id.toString() };
+
+        if (priority) {
+            searchCriteria.priority = priority;
+        }
+
+        if (completed !== undefined) {
+            searchCriteria.completed = completed === 'true';
+        }
+
+        if (startDate || endDate) {
+            searchCriteria.deadline = {};
+            if (startDate) {
+                searchCriteria.deadline.$gte = new Date(startDate);
+            }
+            if (endDate) {
+                searchCriteria.deadline.$lte = new Date(endDate);
+            }
+        }
+
+        if (query) {
+            searchCriteria.$or = [
+                { title: new RegExp(query, 'i') },
+                { description: new RegExp(query, 'i') }
+            ];
+        }
+
+        console.log('Final search criteria:', JSON.stringify(searchCriteria, null, 2));
+
+        const tasks = await Task.find(searchCriteria).sort({ deadline: 1 });
+        console.log(`Found ${tasks.length} tasks`);
+
+        res.json(tasks);
+    } catch (error) {
+        console.error('Filter tasks error:', error);
+        res.status(500).json({ 
+            error: 'Failed to filter tasks',
+            details: error.message,
+            stack: error.stack
+        });
+    }
+});
+
 // GET /api/tasks/:id - Get a specific task
 app.get('/api/tasks/:id', auth, async (req, res) => {
     try {
@@ -384,13 +470,11 @@ app.get('/api/tasks/:id', auth, async (req, res) => {
             _id: req.params.id,
             userId: req.user._id 
         });
-
+        
         if (!task) {
-            console.log('Task not found');
             return res.status(404).json({ error: 'Task not found' });
         }
-
-        console.log('Task fetched successfully');
+        
         res.json(task);
     } catch (error) {
         console.error('Error fetching task:', error);
@@ -555,54 +639,6 @@ app.delete('/api/tasks/:id', auth, async (req, res) => {
     }
 });
 
-// GET /api/tasks/search - Search tasks
-app.get('/api/tasks/search', auth, async (req, res) => {
-    try {
-        console.log('\n=== Searching Tasks ===');
-        const { query, priority, completed, startDate, endDate } = req.query;
-        
-        const searchCriteria = { userId: req.user._id };
-
-        // Add search criteria based on query parameters
-        if (query) {
-            searchCriteria.$or = [
-                { title: new RegExp(query, 'i') },
-                { description: new RegExp(query, 'i') }
-            ];
-        }
-
-        if (priority) {
-            searchCriteria.priority = priority;
-        }
-
-        if (completed !== undefined) {
-            searchCriteria.completed = completed === 'true';
-        }
-
-        if (startDate || endDate) {
-            searchCriteria.deadline = {};
-            if (startDate) {
-                searchCriteria.deadline.$gte = new Date(startDate);
-            }
-            if (endDate) {
-                searchCriteria.deadline.$lte = new Date(endDate);
-            }
-        }
-
-        const tasks = await Task.find(searchCriteria)
-            .sort({ deadline: 1 });
-
-        console.log('Tasks searched successfully');
-        res.json(tasks);
-    } catch (error) {
-        console.error('Error searching tasks:', error);
-        res.status(500).json({ 
-            error: 'Failed to search tasks',
-            details: error.message 
-        });
-    }
-});
-
 // Create Task
 app.post('/api/tasks', auth, async (req, res) => {
     try {
@@ -758,143 +794,28 @@ app.get('/api/test-email', async (req, res) => {
     }
 });
 
-// Email verification endpoint
-app.get('/api/users/verify/:token', async (req, res) => {
+// Toggle task completion status
+app.patch('/api/tasks/:id/toggle', auth, async (req, res) => {
     try {
-        const token = req.params.token;
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const task = await Task.findOne({ 
+            _id: req.params.id, 
+            userId: req.user._id 
+        });
         
-        const user = await User.findOne({ _id: decoded.userId });
-        if (!user) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'User not found'
-            });
+        if (!task) {
+            return res.status(404).json({ error: 'Task not found' });
         }
 
-        if (user.isVerified) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Email already verified'
-            });
-        }
-
-        user.isVerified = true;
-        await user.save();
-
-        res.json({
-            status: 'success',
-            message: 'Email verified successfully'
-        });
-    } catch (error) {
-        res.status(400).json({
-            status: 'error',
-            message: 'Invalid or expired verification token'
-        });
-    }
-});
-
-// Request password reset
-app.post('/api/users/reset-password-request', async (req, res) => {
-    try {
-        const { email } = req.body;
-        const user = await User.findOne({ email });
+        task.completed = !task.completed;
+        await task.save();
         
-        if (!user) {
-            return res.status(404).json({
-                status: 'error',
-                message: 'User not found'
-            });
-        }
-
-        const resetToken = jwt.sign(
-            { userId: user._id },
-            process.env.JWT_SECRET,
-            { expiresIn: '1h' }
-        );
-
-        // Store reset token and expiry
-        user.resetToken = resetToken;
-        user.resetTokenExpiry = Date.now() + 3600000; // 1 hour
-        await user.save();
-
-        // Send reset email
-        const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
-        const mailOptions = {
-            from: process.env.EMAIL_USER,
-            to: user.email,
-            subject: 'Password Reset Request',
-            html: `
-                <h1>Password Reset Request</h1>
-                <p>Click the link below to reset your password. This link will expire in 1 hour.</p>
-                <a href="${resetUrl}">Reset Password</a>
-                <p>If you didn't request this, please ignore this email.</p>
-            `
-        };
-
-        await transporter.sendMail(mailOptions);
-
-        res.json({
-            status: 'success',
-            message: 'Password reset email sent'
-        });
+        res.json(task);
     } catch (error) {
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to send reset email'
+        console.error('Toggle task error:', error);
+        res.status(500).json({ 
+            error: 'Failed to toggle task',
+            details: error.message 
         });
-    }
-});
-
-// Reset password
-app.post('/api/users/reset-password/:token', async (req, res) => {
-    try {
-        const { token } = req.params;
-        const { password } = req.body;
-
-        const user = await User.findOne({
-            resetToken: token,
-            resetTokenExpiry: { $gt: Date.now() }
-        });
-
-        if (!user) {
-            return res.status(400).json({
-                status: 'error',
-                message: 'Invalid or expired reset token'
-            });
-        }
-
-        // Hash new password
-        const salt = await bcrypt.genSalt(10);
-        user.password = await bcrypt.hash(password, salt);
-        user.resetToken = undefined;
-        user.resetTokenExpiry = undefined;
-        await user.save();
-
-        res.json({
-            status: 'success',
-            message: 'Password reset successful'
-        });
-    } catch (error) {
-        res.status(500).json({
-            status: 'error',
-            message: 'Failed to reset password'
-        });
-    }
-});
-
-// Health check endpoint
-app.get('/api/health', (req, res) => {
-    const healthcheck = {
-        uptime: process.uptime(),
-        message: 'OK',
-        timestamp: Date.now()
-    };
-    try {
-        res.send(healthcheck);
-    } catch (error) {
-        healthcheck.message = error;
-        res.status(503).send();
     }
 });
 
@@ -917,10 +838,18 @@ mongoose.connect(process.env.MONGODB_URI, {
 });
 
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 }).on('error', (err) => {
-    console.error('Server error:', err);
+    if (err.code === 'EADDRINUSE') {
+        console.log(`Port ${PORT} is in use. Trying port 3000...`);
+        server.close();
+        app.listen(3000, () => {
+            console.log('Server is running on port 3000');
+        });
+    } else {
+        console.error('Server error:', err);
+    }
 });
 
 // Handle graceful shutdown
@@ -936,4 +865,18 @@ process.on('SIGINT', () => {
         console.log('Server shutting down');
         process.exit(0);
     });
+});
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+    console.error('Uncaught Exception:', err);
+    // Gracefully shutdown
+    process.exit(1);
+});
+
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (err) => {
+    console.error('Unhandled Rejection:', err);
+    // Gracefully shutdown
+    process.exit(1);
 });
