@@ -114,31 +114,41 @@ const api = {
             
             console.log('Request options:', requestOptions);
 
-            const response = await fetch(url, requestOptions);
-            
-            const contentType = response.headers.get('content-type');
-            if (!contentType || !contentType.includes('application/json')) {
-                throw new Error(`Invalid response type: ${contentType}`);
-            }
+            try {
+                const response = await fetch(url, requestOptions);
+                
+                // First check if the server is responding
+                if (!response) {
+                    throw new Error('No response from server');
+                }
 
-            const data = await response.json();
-            
-            if (!response.ok) {
-                throw new Error(data.message || `Server error: ${response.status}`);
-            }
+                // Try to parse JSON response
+                let data;
+                const contentType = response.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    data = await response.json();
+                } else {
+                    throw new Error(`Invalid response type: ${contentType}`);
+                }
 
-            return data;
+                // Check if response was successful
+                if (!response.ok) {
+                    throw new Error(data.message || `Server error: ${response.status}`);
+                }
+
+                return data;
+            } catch (fetchError) {
+                console.error('Fetch error:', fetchError);
+                if (retries > 0) {
+                    console.log(`Retrying request... (${retries} attempts left)`);
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    return this.request(endpoint, options, retries - 1);
+                }
+                throw new Error(`Network error: ${fetchError.message}`);
+            }
         } catch (error) {
             console.error('API request error:', error);
-            
-            if (retries > 0 && error.message.includes('Failed to fetch')) {
-                console.log(`Network error, retrying... (${retries} attempts left)`);
-                const backoffTime = Math.min(1000 * (2 ** (3 - retries)), 5000);
-                await new Promise(resolve => setTimeout(resolve, backoffTime));
-                return this.request(endpoint, options, retries - 1);
-            }
-            
-            throw new Error(`Network error: ${error.message}`);
+            throw error;
         }
     },
 

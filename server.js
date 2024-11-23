@@ -27,7 +27,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // Serve static files with proper MIME types
-app.use(express.static(__dirname, {
+app.use(express.static(path.join(__dirname), {
     setHeaders: (res, filePath) => {
         if (filePath.endsWith('.js')) {
             res.set('Content-Type', 'application/javascript');
@@ -38,6 +38,15 @@ app.use(express.static(__dirname, {
         }
     }
 }));
+
+// Serve index.html for all routes except /api
+app.get('*', (req, res, next) => {
+    if (req.url.startsWith('/api')) {
+        next();
+    } else {
+        res.sendFile(path.join(__dirname, 'index.html'));
+    }
+});
 
 // Security headers
 app.use((req, res, next) => {
@@ -92,14 +101,6 @@ app.use((req, res, next) => {
     next();
 });
 
-// Serve index.html for all routes except /api
-app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api')) {
-        return next();
-    }
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
 // Request logging middleware
 app.use((req, res, next) => {
     const start = Date.now();
@@ -117,42 +118,62 @@ app.use((req, res, next) => {
     next();
 });
 
-// Health check endpoint with detailed status
-app.get('/health', async (req, res) => {
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
+
+// API Routes
+app.get('/api/health', (req, res) => {
+    res.status(200).json({ status: 'API is healthy', timestamp: new Date().toISOString() });
+});
+
+// User Routes
+app.post('/api/users/register', async (req, res) => {
     try {
-        // Check MongoDB connection
-        const dbStatus = mongoose.connection.readyState === 1 ? 'connected' : 'disconnected';
+        const { name, email, password } = req.body;
         
-        // Basic memory usage
-        const memoryUsage = process.memoryUsage();
-        
-        res.status(200).json({
-            status: 'ok',
-            timestamp: new Date().toISOString(),
-            server: {
-                uptime: process.uptime(),
-                memory: {
-                    heapUsed: Math.round(memoryUsage.heapUsed / 1024 / 1024) + 'MB',
-                    heapTotal: Math.round(memoryUsage.heapTotal / 1024 / 1024) + 'MB'
-                }
-            },
-            database: {
-                status: dbStatus
+        // Validate input
+        if (!name || !email || !password) {
+            return res.status(400).json({ message: 'All fields are required' });
+        }
+
+        // Check if user already exists
+        const existingUser = await User.findOne({ email });
+        if (existingUser) {
+            return res.status(400).json({ message: 'User already exists' });
+        }
+
+        // Create new user
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const user = new User({
+            name,
+            email,
+            password: hashedPassword
+        });
+
+        await user.save();
+
+        // Create token
+        const token = jwt.sign(
+            { userId: user._id },
+            process.env.JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        res.status(201).json({
+            message: 'User created successfully',
+            token,
+            user: {
+                id: user._id,
+                name: user.name,
+                email: user.email
             }
         });
     } catch (error) {
-        console.error('Health check error:', error);
-        res.status(500).json({
-            status: 'error',
-            message: 'Health check failed',
-            error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-        });
+        console.error('Registration error:', error);
+        res.status(500).json({ message: 'Error creating user' });
     }
-});
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'ok', message: 'Server is running' });
 });
 
 // Add content-type middleware for API routes
