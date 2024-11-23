@@ -55,12 +55,7 @@ const allowedOrigins = [
     'http://127.0.0.1:5000',
     'http://localhost:8080',
     'http://127.0.0.1:8080',
-    'https://task-master.onrender.com',
-    'https://task-masters.onrender.com',
-    'https://task-master-frontend.onrender.com',
-    'https://task-master-api.onrender.com',
-    'https://task-master-u3ss.onrender.com',
-    'https://task-master-350012.web.app'
+    'https://task-master-u3ss.onrender.com'
 ];
 
 // CORS middleware with detailed logging

@@ -16,9 +16,12 @@ services:
       - key: EMAIL_PASS
         sync: false
       - key: FRONTEND_URL
-        value: https://task-master.onrender.com
+        value: https://task-master-u3ss.onrender.com
     healthCheckPath: /health
     autoDeploy: true
+    plan: free
+    domains:
+      - task-master-u3ss.onrender.com
     disk:
       name: task-master-data
       mountPath: /data

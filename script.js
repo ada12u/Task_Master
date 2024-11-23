@@ -16,7 +16,7 @@ window.showAddTaskModal = function() {
 // API Configuration
 const API_BASE_URL = window.location.hostname === 'localhost' 
     ? 'http://localhost:8080'
-    : 'https://task-master-api.onrender.com';
+    : 'https://task-master-u3ss.onrender.com';
 
 // State Management
 let authToken = localStorage.getItem('authToken');
